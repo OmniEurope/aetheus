@@ -70,10 +70,23 @@ VOLUME_INVENTORY="$(docker volume ls --filter 'label=com.docker.compose.project'
   --format '{{.Name}}\t{{.Label "com.docker.compose.project"}}')" || {
   echo "Could not inventory Compose volumes." >&2; exit 1;
 }
-RESIDUAL_CONTAINER_DETAILS="$(printf '%s\n' "$CONTAINER_INVENTORY" \
-  | awk -F '\t' '$3 ~ /^aetheus-qa-(rollback-)?[0-9]+$/ { print }')"
-RESIDUAL_VOLUME_DETAILS="$(printf '%s\n' "$VOLUME_INVENTORY" \
-  | awk -F '\t' '$2 ~ /^aetheus-qa-(rollback-)?[0-9]+$/ { print }')"
+# A residual is a QA stack of this run or of an older one: prune-stale-qa-compose.sh removed the older
+# ones and this run tore its own down. A newer run's stack is another QA still running on the host
+# (a nightly beside a candidate), which the prune protects on purpose; counting it made a successful
+# QA fail on its neighbour's live stack (candidate 2505, QA 2514 beside nightly QA 2515, 2026-10-02).
+# With a non-numeric run id every QA stack still counts, as before.
+qa_residuals() {
+  awk -F '\t' -v column="$1" -v run="$RUN_ID" '
+    $column ~ /^aetheus-qa-(rollback-)?[0-9]+$/ {
+      id = $column
+      sub(/^aetheus-qa-(rollback-)?/, "", id)
+      if (run ~ /^[0-9]+$/ && id + 0 > run + 0) { concurrent++; next }
+      print
+    }
+    END { if (concurrent) printf "Not counted: %d resource(s) of a newer QA run still in progress.\n", concurrent > "/dev/stderr" }'
+}
+RESIDUAL_CONTAINER_DETAILS="$(printf '%s\n' "$CONTAINER_INVENTORY" | qa_residuals 3)"
+RESIDUAL_VOLUME_DETAILS="$(printf '%s\n' "$VOLUME_INVENTORY" | qa_residuals 2)"
 RESIDUAL_CONTAINERS="$(printf '%s\n' "$RESIDUAL_CONTAINER_DETAILS" | awk 'NF { count++ } END { print count + 0 }')"
 RESIDUAL_VOLUMES="$(printf '%s\n' "$RESIDUAL_VOLUME_DETAILS" | awk 'NF { count++ } END { print count + 0 }')"
 COLLECTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"

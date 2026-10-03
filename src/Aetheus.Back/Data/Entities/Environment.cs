@@ -12,19 +12,6 @@ public class Environment
     public bool RequireApproval { get; set; }
     public int ApprovalTimeoutMinutes { get; set; } = 1440;
     public string? ApprovalInstructions { get; set; }
-
-    /// <summary>
-    /// Retired: the former "advance a branch after each deployment" setting. A branch is now advanced
-    /// by an explicit <c>type: advance-branch</c> step of the deploy pipeline, and nothing in this
-    /// version reads or writes the column. Kept for expand/contract; dropped by a later contract
-    /// migration once no running colour reads them, recette R2-001 (blue-green production shares one
-    /// database with the previous colour, which still reads it).
-    /// </summary>
-    public bool AdvanceBranchOnDeploy { get; set; }
-
-    /// <summary>Retired with <see cref="AdvanceBranchOnDeploy"/>. Kept for expand/contract; dropped by a
-    /// later contract migration once no running colour reads them, recette R2-001.</summary>
-    public string? AdvanceBranchName { get; set; }
     public bool DastEnabled { get; set; }
     public bool DastIsEphemeral { get; set; }
     public bool DastContainsRealData { get; set; }

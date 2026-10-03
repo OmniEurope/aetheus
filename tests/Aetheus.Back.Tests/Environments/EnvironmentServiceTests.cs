@@ -251,23 +251,4 @@ public class EnvironmentServiceTests
         await _repo.Received(1).RemoveEnvironmentAsync(Arg.Any<Environment>(), Arg.Any<CancellationToken>());
         await _audit.Received(1).LogAsync("Deleted", "Environment", 1, "prod", Arg.Any<CancellationToken>());
     }
-
-    /// <summary>
-    /// Recette R2-001: the "advance a branch after each deployment" setting is retired (a pipeline step
-    /// does it now). Blue-green production shares its database with the previous colour, which still
-    /// reads the two columns, so this version must leave whatever they hold untouched.
-    /// </summary>
-    [Fact]
-    public async Task UpdateEnvironmentAsync_LeavesTheRetiredBranchAdvanceColumnsUntouched()
-    {
-        var env = new Environment { Id = 1, Name = "prod", AdvanceBranchOnDeploy = true, AdvanceBranchName = "main" };
-        _repo.FindEnvironmentAsync(1, Arg.Any<CancellationToken>()).Returns(env);
-        _repo.GetEnvironmentWithServersAsync(1, Arg.Any<CancellationToken>()).Returns(env);
-
-        await _sut.UpdateEnvironmentAsync(1, new UpdateEnvironmentRequest { Name = "prod" },
-            TestContext.Current.CancellationToken);
-
-        Assert.True(env.AdvanceBranchOnDeploy);
-        Assert.Equal("main", env.AdvanceBranchName);
-    }
 }

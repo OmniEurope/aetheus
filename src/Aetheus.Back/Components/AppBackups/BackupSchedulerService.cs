@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Back.Configuration;
+using Aetheus.Back.Services;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Aetheus.Back.Components.AppBackups;
@@ -13,12 +14,19 @@ namespace Aetheus.Back.Components.AppBackups;
 public sealed class BackupSchedulerService(
     IServiceScopeFactory scopeFactory,
     TimeProvider timeProvider,
-    ILogger<BackupSchedulerService> logger) : BackgroundService
+    ILogger<BackupSchedulerService> logger,
+    IPostgresLeaderLease? leaderLease = null) : BackgroundService
 {
     private static readonly TimeSpan CheckInterval = BackendRuntimeDefaults.SchedulerCheckInterval;
     private static readonly TimeSpan Window = TimeSpan.FromMinutes(2);
 
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    // Only the live colour runs it (decision of 2026-10-02, PostgresLeaderLease).
+    protected override Task ExecuteAsync(CancellationToken stoppingToken) =>
+        leaderLease is null
+            ? RunLeaderLoopAsync(stoppingToken)
+            : leaderLease.RunAsLeaderAsync("aetheus:backup-scheduler", RunLeaderLoopAsync, stoppingToken);
+
+    private async Task RunLeaderLoopAsync(CancellationToken stoppingToken)
     {
         using var timer = new PeriodicTimer(CheckInterval);
         while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false))

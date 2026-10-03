@@ -254,12 +254,18 @@ public partial class VariableLibraryEdit
         if (string.IsNullOrWhiteSpace(model.Key))
             return;
 
-        var entry = await Api.Variables.CreateVariableEntryAsync(Id!.Value, new CreateVariableEntryRequest
+        var outcome = await Api.Variables.CreateVariableEntryAsync(Id!.Value, new CreateVariableEntryRequest
         {
             Key = model.Key,
             Value = model.Value
         });
-        if (entry is not null)
+        if (outcome.StatusCode == System.Net.HttpStatusCode.BadRequest)
+        {
+            // Recette R2-065: the key already exists, so nothing was added: say why.
+            Toast.Error("Error", "LibraryEntryKeyExists", model.Key);
+            return;
+        }
+        if (outcome.IsSuccess)
         {
             _newEntry = new NewEntryModel();
             Toast.Success("Added", "EntryAdded");
@@ -291,12 +297,17 @@ public partial class VariableLibraryEdit
 
     private async Task OnEntryUpdate(VariableEntryDto entry)
     {
-        var updated = await Api.Variables.UpdateVariableEntryAsync(Id!.Value, entry.Id, new UpdateVariableEntryRequest
+        var outcome = await Api.Variables.UpdateVariableEntryAsync(Id!.Value, entry.Id, new UpdateVariableEntryRequest
         {
             Key = _editEntryKey,
             Value = _editEntryValue
         });
-        if (updated is null)
+        if (outcome.StatusCode == System.Net.HttpStatusCode.BadRequest)
+        {
+            Toast.Error("Error", "LibraryEntryKeyExists", _editEntryKey);
+            return;
+        }
+        if (!outcome.IsSuccess)
         {
             Toast.Error("Error", "OperationFailed");
             return;

@@ -93,6 +93,19 @@ for image in "$AETHEUS_BACK_IMAGE" "$AETHEUS_FRONT_IMAGE" "$AETHEUS_BROWSER_SMOK
     = "$ARTIFACT_COMMIT" ] || fail "Image revision is invalid: $image"
 done
 
+# The version is the candidate's, read from the agent manifest the CI built into the verified backend
+# image: the backend, both agents and the manifest were stamped with it, so the site now shows the
+# version the agents carry (ADR-033, recette R2-076). It used to be recomputed from this deploy's own
+# run counter (1.2.118 on the site against 1.2.402 for the agents, 2026-10-03).
+APP_VERSION="$(docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges \
+  --entrypoint cat "$AETHEUS_BACK_IMAGE" /app/wwwroot/downloads/agent-release-manifest.json \
+  | sed -n 's/^[[:space:]]*"softwareVersion":[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)"
+case "$APP_VERSION" in
+  ''|*[!0-9A-Za-z._-]*) fail "The candidate's agent manifest names no valid version: '$APP_VERSION'." ;;
+esac
+echo "##aetheus[setvariable name=APP_VERSION]$APP_VERSION"
+echo ">>> Candidate version $APP_VERSION"
+
 # The first canonical deploy can run on an agent installed before the dedicated production-state
 # directory existed. The agent user cannot create children of /var/lib, but it already owns the Docker
 # socket for this deployment. A root process inside that immutable image, with a bind limited to the

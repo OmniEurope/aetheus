@@ -235,6 +235,7 @@
         "--exclude", ".pipeline-artifacts",
         "--exclude", ".analysis-*",
         "--exclude", ".qa-*",
+        "--exclude", "/src/tests/security-rules",
         "--output-format", "sarif",
         "--output-file", "/out/report.sarif"
       ],
@@ -257,7 +258,7 @@
       "image": "pmdcode/pmd:7.24.0@sha256:10b8bccb6dfcebec77e10a54e2eb971fcd6a576582eb2887b7e7020140cb8bc5",
       "entryPoint": "pmd",
       "fileExtensions": [".java"],
-      "arguments": ["check", "-d", "/src", "-R", "rulesets/java/quickstart.xml", "-f", "sarif", "-r", "/out/report.sarif"],
+      "arguments": ["check", "-d", "/src", "--exclude=/src/tests/security-rules", "-R", "rulesets/java/quickstart.xml", "-f", "sarif", "-r", "/out/report.sarif"],
       "reportPath": "report.sarif",
       "reportFormat": "Sarif",
       "findingExitCodes": [4],

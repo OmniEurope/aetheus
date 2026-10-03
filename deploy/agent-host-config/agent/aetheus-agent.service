@@ -45,7 +45,7 @@ Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/s
 # --- Security hardening ---
 #{NNP_BLOCK}#
 #{PROTECT_SYSTEM_BLOCK}#
-ProtectHome=true
+#{PROTECT_HOME_BLOCK}#
 ReadWritePaths=#{WORK_DIR}# #{INSTALL_DIR}##{READ_WRITE_PATHS_BLOCK}#
 PrivateTmp=true
 ProtectControlGroups=true

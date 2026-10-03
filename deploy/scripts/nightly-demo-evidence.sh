@@ -6,8 +6,10 @@
 # serving. That is the same reason the response-time budget in the smoke step is advisory - a growth
 # comparison is a signal about the build, not a verdict on the environment.
 #
-# The comparison is against the previous SUCCESSFUL Nightly, whose metrics live in the environment
-# state directory. A first run has no baseline and says so rather than inventing one.
+# The comparison is against the previous SUCCESSFUL Nightly. Its metrics come from that run's own
+# evidence bundle (demo-metrics.txt), restored by the pipeline into NIGHTLY_BASELINE_DIR: nothing
+# survives on the host between runs (user decision, 2026-10-02). A first run has no baseline and says
+# so rather than inventing one.
 set -eu
 
 fail() {
@@ -19,15 +21,16 @@ fail() {
 # library decorative. What must hold is that this is a demo state directory, not production's. The
 # NIGHTLY_DEPLOY_TARGET check that stood here went with the variable (PLAN-003 2.1): a deployment
 # deploys, and this production-token guard is what keeps the demo's evidence away from production.
+WORKSPACE="${WORKSPACE:?WORKSPACE is required}"
 case "${STATE_DIR:-}" in
   *prod*) fail "The demo state directory names production: $STATE_DIR" ;;
-  /var/lib/*/*) fail "The demo state directory must be a direct child of /var/lib: $STATE_DIR" ;;
-  /var/lib/?*) ;;
-  *) fail "The demo state directory must live under /var/lib: '${STATE_DIR:-}'" ;;
+  *..*) fail "The demo state directory must not contain a traversal: $STATE_DIR" ;;
+  "$WORKSPACE"/*/*) fail "The demo state directory must be a direct child of the run workspace: $STATE_DIR" ;;
+  "$WORKSPACE"/?*) ;;
+  *) fail "The demo state directory must live in the run workspace: '${STATE_DIR:-}'" ;;
 esac
 COMPOSE_PROJECT="${COMPOSE_PROJECT:?COMPOSE_PROJECT is required}"
 APP_HOST="${APP_HOST:?APP_HOST is required}"
-WORKSPACE="${WORKSPACE:?WORKSPACE is required}"
 SOURCE_SHA="${BUILD_SOURCEVERSION:?BUILD_SOURCEVERSION is required}"
 STARTED_EPOCH="${NIGHTLY_STARTED_EPOCH:?NIGHTLY_STARTED_EPOCH is required}"
 case "$STARTED_EPOCH" in ''|*[!0-9]*) fail "NIGHTLY_STARTED_EPOCH is invalid." ;; esac
@@ -36,6 +39,15 @@ ARTIFACT_DIR="$WORKSPACE/.pipeline-artifacts"
 EVIDENCE_DIR="$WORKSPACE/.nightly-evidence"
 METRICS_FILE="$STATE_DIR/nightly-metrics"
 [ -d "$EVIDENCE_DIR" ] || fail "The nightly evidence directory is missing."
+BASELINE_FILE=""
+if [ -n "${NIGHTLY_BASELINE_DIR:-}" ] && [ -d "$NIGHTLY_BASELINE_DIR" ]; then
+  BASELINE_FILE="$(find "$NIGHTLY_BASELINE_DIR" -type f -name demo-metrics.txt | head -n 1)"
+fi
+if [ -n "$BASELINE_FILE" ]; then
+  echo ">>> Growth baseline: the previous successful Nightly ($(sed -n 's/^source_sha=//p' "$BASELINE_FILE" | tail -n 1))."
+else
+  echo ">>> No previous successful Nightly evidence: no growth baseline for this run."
+fi
 
 FINISHED_EPOCH="$(date -u +%s)"
 DURATION_SECONDS=$((FINISHED_EPOCH - STARTED_EPOCH))
@@ -46,7 +58,8 @@ BROWSER_BYTES="$(stat -c %s "$ARTIFACT_DIR/aetheus-browser-smoke.tar.gz")"
 VITRINE_BYTES="$(stat -c %s "$ARTIFACT_DIR/aetheus-vitrine.tar.gz")"
 
 previous_metric() {
-  sed -n "s/^$1=//p" "$METRICS_FILE" 2>/dev/null | tail -n 1
+  [ -n "$BASELINE_FILE" ] || return 0
+  sed -n "s/^$1=//p" "$BASELINE_FILE" | tail -n 1
 }
 
 compare_metric() {

@@ -323,6 +323,8 @@ public class RunTimelineTreeTests : BunitContext
 
         var marker = Assert.Single(cut.FindAll(".run-tl-prev-dur"));
         Assert.Contains("StepUsualDuration", marker.TextContent);
+        // Recette R2-044: "2s (moyenne 2s)" in words, the reset arrow is gone.
+        Assert.Null(marker.QuerySelector(".omni-icon"));
         Assert.Equal("test", marker.Closest(".run-tl-row")!.QuerySelector(".run-tl-name")!.TextContent);
         var liveDurations = cut.FindComponents<PipelineRunLiveDuration>()
             .Where(component => component.Instance.IsRunning)

@@ -557,6 +557,13 @@ app.MapHealthChecks("/health/ready", new Microsoft.AspNetCore.Diagnostics.Health
     Predicate = reg => reg.Name == "database"
 }).AllowAnonymous();
 
+// Which backend instance answers this address: a random id drawn at startup, nothing else. Each
+// blue-green colour compares it with its own through the public API address, so only the live colour
+// takes the leader leases (LiveInstanceProbe). Anonymous like the probes above; it exposes no detail.
+app.MapGet(LiveInstanceProbe.InstancePath, (ILiveInstanceProbe probe) => Results.Ok(new { instanceId = probe.InstanceId }))
+    .AllowAnonymous()
+    .ExcludeFromDescription();
+
 app.Run();
 
 public partial class Program { }

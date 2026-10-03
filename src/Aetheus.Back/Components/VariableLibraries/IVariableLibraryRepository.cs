@@ -39,6 +39,9 @@ public interface IVariableLibraryRepository
 
     Task<VariableLibraryEntry?> FindEntryAsync(int entryId, CancellationToken ct = default);
 
+    /// <summary>Whether the library already holds <paramref name="key"/> on an entry other than <paramref name="exceptEntryId"/>.</summary>
+    Task<bool> EntryKeyExistsAsync(int libraryId, string key, int? exceptEntryId, CancellationToken ct = default);
+
     Task AddEntryAsync(VariableLibraryEntry entry, CancellationToken ct = default);
 
     Task AddEntriesRangeAsync(List<VariableLibraryEntry> entries, CancellationToken ct = default);

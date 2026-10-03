@@ -9,8 +9,17 @@ paths = [
   '''(^|/)\.pipeline-artifacts/''',
   '''(^|/)\.qa-test-results/''',
   '''(^|/)coverage[^/]*/''',
-  '''(^|/)src/Aetheus\.Front/wwwroot/lib/'''
+  '''(^|/)src/Aetheus\.Front/wwwroot/lib/''',
+  # The same vendored assets before the move to src/ and the Prometheus to Aetheus rename (history
+  # scans only: the path no longer exists in the tree). Recette R2-055, finding #793.
+  '''(^|/)Prometheus\.Front/wwwroot/lib/'''
 ]
+
+[[allowlists]]
+description = "Agent registration token committed in a53b733c1 (2026-04-05), dead: registration tokens are single-use, expire after 24 h by default and are looked up in the database, whose oldest token is from 2026-07-10 (checked 2026-10-02, recette R2-055). Scoped to that commit and file so any other leak is still reported."
+condition = "AND"
+commits = ["a53b733c1153dca57a1f97dea812ae0fc4642acc"]
+paths = ['''(^|/)Prometheus\.Agent\.Linux/appsettings\.json$''']
 
 [[allowlists]]
 description = "Dovecot names its password hashing scheme, not a credential"

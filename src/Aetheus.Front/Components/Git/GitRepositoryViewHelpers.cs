@@ -24,7 +24,7 @@ internal static class GitRepositoryViewHelpers
         foreach (var line in lines)
         {
             var author = line.AuthorName.Length > 15 ? line.AuthorName[..15] : line.AuthorName.PadRight(15);
-            sb.AppendLine($"{line.ShortSha} {author} {line.AuthorDate:yyyy-MM-dd} │ {line.Line}");
+            sb.AppendLine($"{line.ShortSha} {author} {line.AuthorDate.ToString("d"),-10} │ {line.Line}");
         }
         return sb.ToString();
     }

@@ -51,6 +51,18 @@ public partial class AnalysisFindingColumns
 
     private void Open(AnalysisFindingDto finding) => Navigation.NavigateTo(FindingHref(finding.Id, RunId));
 
+    /// <summary>Recette R2-053: the title and, under it, the message, read on hover of the one-line title.</summary>
+    internal static string TitleTooltip(AnalysisFindingDto finding) =>
+        string.IsNullOrWhiteSpace(finding.Message) || finding.Message == finding.Title
+            ? finding.Title
+            : $"{finding.Title}\n{finding.Message}";
+
+    /// <summary>Recette R2-053: <c>path:line</c>, the form an editor and a terminal both read.</summary>
+    internal static string LocationText(AnalysisFindingOccurrenceDto occurrence) =>
+        occurrence.StartLine is { } line
+            ? string.Create(System.Globalization.CultureInfo.InvariantCulture, $"{occurrence.FilePath}:{line}")
+            : occurrence.FilePath ?? string.Empty;
+
     /// <summary>
     /// A finding of one pipeline run as the row every findings list shows: what the run saw of it (file,
     /// line, "new") is its latest occurrence.

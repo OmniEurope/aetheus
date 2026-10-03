@@ -1,46 +1,79 @@
+// kit-model RepositoryScan 1
 // SPDX-License-Identifier: EUPL-1.2
+//
+// File enumeration for repository-wide guard tests, with one property the raw
+// Directory.EnumerateFiles does not have: it refuses to return nothing.
+//
+// Why: a guard that scans the repository and finds no file passes. Every assertion it makes is
+// vacuously true over an empty set, so it reports green while protecting nothing (seen in Aetheus:
+// a guard excluded the whole repository when the suite ran from a worktree).
+//
+// Copy as is next to the guards that use it (FileSizeAuditTests) and adjust only the namespace. The
+// repository root is the folder holding global.json, found by walking up from the test binary, so no
+// path constant is needed.
+// Keep the first line of this file in the copy: it tells the kit's verify-rules.ps1 which version of
+// the model the copy implements (STD-KITCOPY).
+
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+
 namespace Aetheus.Front.Tests.Architecture;
 
-/// <summary>
-/// File enumeration for repository-wide guards, with one property the raw
-/// <see cref="Directory.EnumerateFiles(string, string, SearchOption)"/> does not have: it refuses to
-/// return nothing.
-///
-/// Why: a guard that scans the repository and finds no file passes. Every assertion it makes is
-/// vacuously true over an empty set, so it reports green while protecting nothing, and nobody
-/// notices. The back suite hit exactly that (DeliveryReproducibilityAuditTests excluded the whole
-/// repository when run from a worktree); its twin of this helper closed it there, this one closes
-/// it for the front guards.
-/// </summary>
 internal static class RepositoryScan
 {
+    /// <summary>The repository root: the nearest ancestor of the test binary holding global.json.</summary>
     internal static string Root
     {
         get
         {
             var directory = new DirectoryInfo(AppContext.BaseDirectory);
-            while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "Aetheus.slnx")))
+            while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "global.json")))
+            {
                 directory = directory.Parent;
+            }
+
             return directory?.FullName
-                   ?? throw new InvalidOperationException("Could not locate repository root (Aetheus.slnx).");
+                ?? throw new InvalidOperationException("Could not locate the repository root (global.json).");
         }
     }
 
     /// <summary>Enumerates and fails loudly when the scan is empty.</summary>
-    internal static IReadOnlyList<string> Enumerate(
-        string directory,
-        string pattern,
-        SearchOption option = SearchOption.AllDirectories)
+    internal static IReadOnlyList<string> Enumerate(string directory, string pattern)
     {
-        var files = Directory.Exists(directory)
-            ? Directory.EnumerateFiles(directory, pattern, option).ToList()
-            : [];
+        var files = EnumerateOptional(directory, pattern);
         if (files.Count == 0)
+        {
             throw new InvalidOperationException(
                 $"Scanning '{directory}' for '{pattern}' returned no file. A guard that scans nothing "
                 + "passes vacuously, so this is reported as a failure rather than a green run.");
+        }
+
         return files;
     }
+
+    /// <summary>
+    /// Enumerates without the floor, skipping build output. Only for one leg of a sweep whose total
+    /// the caller still proves non-empty.
+    /// </summary>
+    internal static IReadOnlyList<string> EnumerateOptional(string directory, string pattern)
+        => Directory.Exists(directory)
+            ? Directory.EnumerateFiles(directory, pattern, SearchOption.AllDirectories)
+                .Where(file => !IsBuildOutput(file))
+                .ToList()
+            : [];
+
+    private static bool IsBuildOutput(string file)
+    {
+        var separator = Path.DirectorySeparatorChar;
+        return file.Contains($"{separator}bin{separator}", StringComparison.OrdinalIgnoreCase)
+            || file.Contains($"{separator}obj{separator}", StringComparison.OrdinalIgnoreCase)
+            || file.Contains($"{separator}node_modules{separator}", StringComparison.OrdinalIgnoreCase);
+    }
+
+    // Aetheus extensions beyond the kit model: the front's page folders (project configuration) and a
+    // multi-folder scan with one floor over the union (candidate for the model).
 
     /// <summary>
     /// The folders holding the maintained pages, their dialogs and the shared components: since
@@ -49,7 +82,7 @@ internal static class RepositoryScan
     /// </summary>
     internal static IReadOnlyList<string> PageRoots =>
     [
-        Path.Combine(Root, "src", "Aetheus.Front", "Components")
+        Path.Combine(Root, "src", "Aetheus.Front", "Components"),
     ];
 
     /// <summary>
@@ -63,15 +96,15 @@ internal static class RepositoryScan
     {
         var roots = directories.ToList();
         var files = roots
-            .Where(Directory.Exists)
-            .SelectMany(directory => Directory.EnumerateFiles(directory, pattern, SearchOption.AllDirectories)
-                .Select(file => (Root: directory, File: file)))
+            .SelectMany(directory => EnumerateOptional(directory, pattern).Select(file => (Root: directory, File: file)))
             .ToList();
         if (files.Count == 0)
+        {
             throw new InvalidOperationException(
                 $"Scanning '{string.Join("', '", roots)}' for '{pattern}' returned no file. A guard that scans "
                 + "nothing passes vacuously, so this is reported as a failure rather than a green run.");
+        }
+
         return files;
     }
-
 }

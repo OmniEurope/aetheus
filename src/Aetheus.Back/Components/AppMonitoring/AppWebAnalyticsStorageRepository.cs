@@ -113,6 +113,12 @@ internal sealed class AppWebAnalyticsStorageRepository(AppDbContext db)
         return [.. budgets.Select(item => new WebAnalyticsStorageBudget(item.Id, item.AnalyticsStorageBudgetBytes))];
     }
 
+    /// <summary>Audit R2-007 follow-up: the events the application accepted since <paramref name="sinceUtc"/>.</summary>
+    public async Task<int> CountAcceptedSinceAsync(int appId, DateTime sinceUtc, CancellationToken ct) =>
+        await db.AppAnalyticsIngestVolumes.AsNoTracking()
+            .Where(item => item.MonitoredAppId == appId && item.ReceivedAtUtc >= sinceUtc)
+            .SumAsync(item => item.Count, ct).ConfigureAwait(false);
+
     public async Task<WebAnalyticsPurgeResult> PurgeAsync(
         DateTime eventCutoffUtc,
         DateTime sessionCutoffUtc,
@@ -136,7 +142,11 @@ internal sealed class AppWebAnalyticsStorageRepository(AppDbContext db)
         var rejections = await DeleteAsync(
             db.AppAnalyticsRejections.Where(item => item.OccurredAtUtc < rejectionCutoffUtc),
             ct).ConfigureAwait(false);
-        return new WebAnalyticsPurgeResult(events, sessions, identities, aggregates, pages, rejections);
+        // The accepted volumes are only read over the last hour; they go with the rejections.
+        var volumes = await DeleteAsync(
+            db.AppAnalyticsIngestVolumes.Where(item => item.ReceivedAtUtc < rejectionCutoffUtc),
+            ct).ConfigureAwait(false);
+        return new WebAnalyticsPurgeResult(events, sessions, identities, aggregates, pages, rejections, volumes);
     }
 
     /// <summary>How many rows of <paramref name="rowBytes"/> free <paramref name="excessBytes"/>, rounded up.</summary>

@@ -238,6 +238,13 @@ public class VariableLibraryRepository(AppDbContext db) : IVariableLibraryReposi
         return await db.VariableLibraryEntries.FindAsync([entryId], ct).ConfigureAwait(false);
     }
 
+    public async Task<bool> EntryKeyExistsAsync(int libraryId, string key, int? exceptEntryId, CancellationToken ct = default)
+    {
+        return await db.VariableLibraryEntries.AsNoTracking()
+            .AnyAsync(e => e.VariableLibraryId == libraryId && e.Key == key && e.Id != exceptEntryId, ct)
+            .ConfigureAwait(false);
+    }
+
     public async Task AddEntryAsync(VariableLibraryEntry entry, CancellationToken ct = default)
     {
         db.VariableLibraryEntries.Add(entry);

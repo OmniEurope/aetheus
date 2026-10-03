@@ -362,13 +362,10 @@ else
                                     aria-label="@($"{L["PreventForcePush"]}: {r.Pattern}")" />
                             </Template>
                         </OmniDataGridColumn>
-                        <OmniDataGridColumn TItem="BranchProtectionRuleDto" Property="RequirePullRequest" Title="@L["RequirePR"]" Width="130px" Filterable="true" FilterType="OmniDataGridColumnFilterType.Select" FilterValues="@GridFilterText.Booleans" FormatFilterValue="@_grids.YesNoText(L)" >
-                            <Template Context="r">
-                                <OmniSwitch Value="@r.RequirePullRequest" ValueChanged="@((bool v) => UpdateProtectionRule(r, requirePr: v))"
-                                    ValueExpression="@(() => r.RequirePullRequest)" Disabled="@(!_canWrite)"
-                                    aria-label="@($"{L["RequirePR"]}: {r.Pattern}")" />
-                            </Template>
-                        </OmniDataGridColumn>
+                        @* Recette R2-042 (2026-10-02, user decision): "require a pull request" is set aside. Nothing
+                           ever enforced it (neither the pre-receive hook nor the advance-branch step), so offering
+                           it promised a protection that did not exist. The column, the DTO field and the update
+                           path stay in the code; refusing deletion and force-push stays active. *@
                         <OmniDataGridColumn TItem="BranchProtectionRuleDto" Title="" Width="80px" Sortable="false" TextAlign="OmniDataGridTextAlign.End" Filterable="false" >
                             <Template Context="r">
                                 <OmniButton Variant="OmniButtonVariant.Danger" OnClick="@(() => DeleteProtectionRule(r))" Disabled="@(!_canWrite)" title="@L["Delete"]" Label="@L["Delete"]"><OmniIcon Name="OmniIconName.Delete" /></OmniButton>

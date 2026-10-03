@@ -16,6 +16,9 @@
             <GradeBadge Value="@grade" Title="@L["GateGrade"]" Class="pipeline-gate-grade-badge analysis-run-gate-grade" />
         }
     </div>
+    @* Recette R2-052: what the letter is made of. A B over "0 findings" came from a measure (coverage,
+       duplication, complexity, a cycle) the tab did not show. *@
+    <AnalysisGradeBreakdown Grade="@Gate.Grade" ShowLimitingDomain="true" />
     <div class="analysis-run-gate-toolbar omni-u-mb-md">
         @* The OE key-figure tile: value over its label, the label wraps, so a narrow column keeps
            both inside the tile (a side-by-side nowrap pair spilled out of it at 375 px). *@

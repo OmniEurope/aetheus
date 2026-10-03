@@ -379,10 +379,30 @@ public sealed class PipelineStepTaskDispatcher(
                 await branchAdvanceSteps.ExecuteAsync(runId, stepRun, stepDef, legVars, ct).ConfigureAwait(false);
                 return StepDispatchResult.Handled;
             default:
-                taskBuilder.CreateCommandTask(
+                return DispatchCommandStep(
                     runId, legServer, stepRun, stepDef, legVars, stageDef, stageIsContainer, secretKeys);
-                return StepDispatchResult.Handled;
         }
+    }
+
+    private StepDispatchResult DispatchCommandStep(
+        int runId, Server legServer, PipelineStepRun stepRun,
+        PipelineStepDefinition stepDef, Dictionary<string, string> legVars,
+        PipelineStageDefinition stageDef, bool stageIsContainer, HashSet<string> secretKeys)
+    {
+        // Recette R2-041: a type written for a newer backend validates with a warning; with no
+        // command of its own it would reach the agent empty, so it fails here, by name.
+        if (!string.IsNullOrWhiteSpace(stepDef.Type)
+            && !PipelineDefinitionValidator.IsKnownStepType(stepDef.Type)
+            && string.IsNullOrWhiteSpace(stepDef.Shell) && !stepDef.Checkout)
+        {
+            PipelineRunHelpers.MarkSystemStepFailed(stepRun, TaskFailureCodes.ToolError,
+                $"Unknown step type '{stepDef.Type}': this backend does not know it (a newer one may).",
+                timeProvider.GetUtcNow().UtcDateTime);
+            return StepDispatchResult.Handled;
+        }
+        taskBuilder.CreateCommandTask(
+            runId, legServer, stepRun, stepDef, legVars, stageDef, stageIsContainer, secretKeys);
+        return StepDispatchResult.Handled;
     }
 
     private void CreateSubstituteTask(

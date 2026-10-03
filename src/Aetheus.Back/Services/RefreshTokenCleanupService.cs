@@ -6,7 +6,8 @@ namespace Aetheus.Back.Services;
 public sealed class RefreshTokenCleanupService(
     IServiceScopeFactory scopeFactory,
     ILogger<RefreshTokenCleanupService> logger,
-    TimeProvider timeProvider) : PeriodicBackgroundService(TimeSpan.FromHours(6))
+    TimeProvider timeProvider,
+    IPostgresLeaderLease? leaderLease = null) : PeriodicBackgroundService(TimeSpan.FromHours(6), leaderLease, "aetheus:refresh-token-cleanup")
 {
     protected override Task ExecuteIterationAsync(CancellationToken ct) => CleanupExpiredTokensAsync(ct);
 

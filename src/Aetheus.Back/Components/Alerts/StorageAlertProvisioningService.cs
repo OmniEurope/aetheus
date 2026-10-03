@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Back.Data.Entities;
+using Aetheus.Back.Services;
 
 namespace Aetheus.Back.Components.Alerts;
 
@@ -10,11 +11,18 @@ namespace Aetheus.Back.Components.Alerts;
 public sealed class StorageAlertProvisioningService(
     IServiceScopeFactory scopeFactory,
     IConfiguration configuration,
-    ILogger<StorageAlertProvisioningService> logger) : BackgroundService
+    ILogger<StorageAlertProvisioningService> logger,
+    IPostgresLeaderLease? leaderLease = null) : BackgroundService
 {
     private static readonly TimeSpan ReconcileInterval = TimeSpan.FromHours(1);
 
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    // Only the live colour runs it (decision of 2026-10-02, PostgresLeaderLease).
+    protected override Task ExecuteAsync(CancellationToken stoppingToken) =>
+        leaderLease is null
+            ? RunLeaderLoopAsync(stoppingToken)
+            : leaderLease.RunAsLeaderAsync("aetheus:storage-alert-provisioning", RunLeaderLoopAsync, stoppingToken);
+
+    private async Task RunLeaderLoopAsync(CancellationToken stoppingToken)
     {
         do
         {

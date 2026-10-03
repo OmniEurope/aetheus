@@ -6,11 +6,12 @@
 # Directory.Build.props, the single place a version bump is made, reviewed and dated in the history.
 # They used to be written three times - that file (1.1.0), a VERSION_PREFIX library entry (1.1) and a
 # literal "1.1." in the CI packaging script - and nothing kept the three in step. The run number is the
-# pipeline's own counter; the suffix is the environment's (VERSION_SUFFIX: empty in production,
+# global run id of the build (BUILD_BUILDID), one counter for every pipeline that builds the application
+# (recette R2-076, 2026-10-03); the suffix is the environment's (VERSION_SUFFIX: empty in production,
 # "-nightly" for the demo), which is why it alone stays in a library.
 #
 # Inputs:
-#   $1 or BUILD_PIPELINE_RUNNUMBER  the per-pipeline run counter (digits only)
+#   $1 or BUILD_PIPELINE_RUNNUMBER  the run number (digits only); every build passes BUILD_BUILDID
 #   VERSION_SUFFIX                  optional, letters, digits, '.', '_' or '-'
 #   WORKSPACE                       the checkout (defaults to the current directory)
 set -eu

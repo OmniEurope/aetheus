@@ -167,6 +167,32 @@ public sealed class UserNotificationService(
         return written;
     }
 
+    public async Task<int> RecordAdministratorEventAsync(
+        string eventType, string subject, string jsonPayload, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(eventType);
+        ArgumentException.ThrowIfNullOrWhiteSpace(subject);
+        var administrators = await repo.GetActiveAdministratorsAsync(ct).ConfigureAwait(false);
+        if (administrators.Count == 0) return 0;
+
+        var boundedSubject = subject.Length <= SubjectMaxLength ? subject : subject[..SubjectMaxLength];
+        var deliveries = administrators.Select(administrator => new NotificationDelivery
+        {
+            RecipientUserId = administrator.UserId,
+            ChannelId = null,
+            EventType = eventType,
+            Subject = boundedSubject,
+            PayloadJson = jsonPayload,
+            // Recorded for the administrator like a project event: no transport exists for it.
+            Status = NotificationDeliveryStatus.NotConfigured,
+            ErrorMessage = null,
+            SentAt = null
+        }).ToList();
+        await repo.AddDeliveriesAsync(deliveries, ct).ConfigureAwait(false);
+        await PushChangedAsync([.. deliveries.Select(delivery => delivery.RecipientUserId)], ct).ConfigureAwait(false);
+        return deliveries.Count;
+    }
+
     public async Task<int> RecordProjectEventAsync(string eventType, string jsonPayload, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(eventType);

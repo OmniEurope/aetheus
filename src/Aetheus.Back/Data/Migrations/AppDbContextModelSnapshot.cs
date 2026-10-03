@@ -1556,6 +1556,32 @@ namespace Aetheus.Back.Data.Migrations
                     b.ToTable("AppAnalyticsEvents");
                 });
 
+            modelBuilder.Entity("Aetheus.Back.Data.Entities.AppAnalyticsIngestVolume", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<int>("Count")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("MonitoredAppId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("ReceivedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ReceivedAtUtc");
+
+                    b.HasIndex("MonitoredAppId", "ReceivedAtUtc");
+
+                    b.ToTable("AppAnalyticsIngestVolumes");
+                });
+
             modelBuilder.Entity("Aetheus.Back.Data.Entities.AppAnalyticsPageAggregate", b =>
                 {
                     b.Property<long>("Id")
@@ -2073,6 +2099,25 @@ namespace Aetheus.Back.Data.Migrations
                         .IsUnique();
 
                     b.ToTable("AppVisitorIdentities");
+                });
+
+            modelBuilder.Entity("Aetheus.Back.Data.Entities.ArtifactStorageMeasurement", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<long>("Bytes")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("MeasuredAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("ArtifactStorageMeasurements");
                 });
 
             modelBuilder.Entity("Aetheus.Back.Data.Entities.AuditLog", b =>
@@ -2888,13 +2933,6 @@ namespace Aetheus.Back.Data.Migrations
                         .HasColumnType("integer");
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<string>("AdvanceBranchName")
-                        .HasMaxLength(255)
-                        .HasColumnType("character varying(255)");
-
-                    b.Property<bool>("AdvanceBranchOnDeploy")
-                        .HasColumnType("boolean");
 
                     b.Property<string>("ApprovalInstructions")
                         .HasColumnType("text");
@@ -4348,6 +4386,25 @@ namespace Aetheus.Back.Data.Migrations
                     b.ToTable("PipelineFavorites");
                 });
 
+            modelBuilder.Entity("Aetheus.Back.Data.Entities.PipelineResourceLock", b =>
+                {
+                    b.Property<string>("Key")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<DateTime>("AcquiredAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("PipelineRunId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Key");
+
+                    b.HasIndex("PipelineRunId");
+
+                    b.ToTable("PipelineResourceLocks");
+                });
+
             modelBuilder.Entity("Aetheus.Back.Data.Entities.PipelineRun", b =>
                 {
                     b.Property<int>("Id")
@@ -5773,6 +5830,9 @@ namespace Aetheus.Back.Data.Migrations
                     b.Property<string>("SudoersBaseline")
                         .HasMaxLength(2048)
                         .HasColumnType("character varying(2048)");
+
+                    b.Property<DateTime?>("SudoersDriftAlertedAt")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("SudoersDriftAlertedFingerprint")
                         .HasMaxLength(64)
@@ -7767,6 +7827,17 @@ namespace Aetheus.Back.Data.Migrations
                     b.Navigation("MonitoredApp");
                 });
 
+            modelBuilder.Entity("Aetheus.Back.Data.Entities.AppAnalyticsIngestVolume", b =>
+                {
+                    b.HasOne("Aetheus.Back.Data.Entities.MonitoredApp", "MonitoredApp")
+                        .WithMany()
+                        .HasForeignKey("MonitoredAppId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("MonitoredApp");
+                });
+
             modelBuilder.Entity("Aetheus.Back.Data.Entities.AppAnalyticsPageAggregate", b =>
                 {
                     b.HasOne("Aetheus.Back.Data.Entities.MonitoredApp", "MonitoredApp")
@@ -8549,6 +8620,17 @@ namespace Aetheus.Back.Data.Migrations
                     b.Navigation("Pipeline");
 
                     b.Navigation("User");
+                });
+
+            modelBuilder.Entity("Aetheus.Back.Data.Entities.PipelineResourceLock", b =>
+                {
+                    b.HasOne("Aetheus.Back.Data.Entities.PipelineRun", "PipelineRun")
+                        .WithMany()
+                        .HasForeignKey("PipelineRunId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("PipelineRun");
                 });
 
             modelBuilder.Entity("Aetheus.Back.Data.Entities.PipelineRun", b =>

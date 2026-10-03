@@ -54,11 +54,11 @@ public sealed partial class HostLiteralAuditTests
     /// tests, and every pipeline definition and configuration template under .pipeline.</summary>
     private static IEnumerable<string> Candidates()
     {
-        var scripts = RepositoryScan.Enumerate(Path.Combine(Root, "deploy", "scripts"), "*", SearchOption.AllDirectories)
+        var scripts = RepositoryScan.Enumerate(Path.Combine(Root, "deploy", "scripts"), "*")
             .Where(path => path.EndsWith(".sh", StringComparison.Ordinal)
                 || (path.EndsWith(".mjs", StringComparison.Ordinal) && !path.EndsWith(".test.mjs", StringComparison.Ordinal)))
             .Where(path => !path.Replace('\\', '/').Contains("/deploy/scripts/qa/", StringComparison.Ordinal));
-        var pipelines = RepositoryScan.Enumerate(Path.Combine(Root, ".pipeline"), "*", SearchOption.AllDirectories)
+        var pipelines = RepositoryScan.Enumerate(Path.Combine(Root, ".pipeline"), "*")
             .Where(path => path.EndsWith(".yaml", StringComparison.Ordinal)
                 || path.EndsWith(".yml", StringComparison.Ordinal)
                 || path.EndsWith(".conf", StringComparison.Ordinal));

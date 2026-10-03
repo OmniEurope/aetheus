@@ -23,6 +23,19 @@ public partial class PipelineRunLineageTile
     private string? ParentPipeline => PipelineRunFormatting.UpstreamPipeline(Run.ResolvedVariables);
     private int? ParentRunId => PipelineRunFormatting.UpstreamRunId(Run.ResolvedVariables);
 
+    /// <summary>Recette R2-048: a sub-label beside a pipeline name and run number does not fit one
+    /// 11rem tile ("Pipeline parente aetheus-candidate #2484" was cut), so the tile spans two columns
+    /// whenever it names a run, a parent or a follow-up, or a long account name.</summary>
+    internal bool IsWide => ParentPipeline is not null
+                            || _lineage is { Downstream.Count: > 0 }
+                            || ActorText.Length > WideActorLength;
+
+    internal const int WideActorLength = 14;
+
+    private string TileClass => IsWide
+        ? "run-overview-card run-lineage-tile run-lineage-tile--wide"
+        : "run-overview-card run-lineage-tile";
+
     /// <summary>The account that launched the run; "automatic" when nobody did, or while it is read.</summary>
     private string ActorText => _lineage?.TriggeredBy ?? L["RunLaunchedAutomatically"];
 

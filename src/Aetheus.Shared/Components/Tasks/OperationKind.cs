@@ -50,7 +50,7 @@ public enum OperationKind
     /// </summary>
     ServiceInstall = 210,
 
-    /// <summary>S-FEAT-W8KN: uninstall an OS package - <c>sudo -n /usr/bin/apt-get remove -y &lt;pkg&gt;</c>.
+    /// <summary>S-FEAT-W8KN: uninstall an OS package - <c>sudo -n /usr/bin/apt-get purge -y &lt;pkg&gt;</c> (recette R2-031).
     /// Same allow-list and sudoers drop-in as <see cref="ServiceInstall"/>.</summary>
     ServiceUninstall = 211,
 

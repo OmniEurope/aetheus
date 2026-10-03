@@ -6,7 +6,7 @@
     </ChildContent></OmniFormField>
     <OmniCheckBox @bind-Value="_preventDeletion">@L["PreventDeletion"]</OmniCheckBox>
     <OmniCheckBox @bind-Value="_preventForcePush">@L["PreventForcePush"]</OmniCheckBox>
-    <OmniCheckBox @bind-Value="_requirePr">@L["RequirePR"]</OmniCheckBox>
+    @* Recette R2-042: "require a pull request" is set aside (never enforced); the field stays false. *@
     <DialogFooter OnCancel="@(() => Dialog.Close(false))">
         <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@Save"><OmniIcon Name="OmniIconName.Save" /> <span>@L["Save"]</span></OmniButton>
     </DialogFooter>

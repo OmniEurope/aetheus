@@ -68,7 +68,9 @@ public class PipelineBranchAdvanceStepTests
         Assert.Equal(TaskExecutionStatus.Success, _stepRun.Status);
         Assert.Equal(0, _stepRun.ExitCode);
         Assert.NotNull(_stepRun.CompletedAt);
-        var line = Assert.Single(_runLines);
+        // R2-071: a success is no run warning; it is the step's output.
+        Assert.Empty(_runLines);
+        var line = Outcome();
         Assert.Contains("'main' advanced from 000000000000 to 111111111111", line, StringComparison.Ordinal);
         Assert.Contains(Version, line, StringComparison.Ordinal);
         await _audit.Received(1).LogAsync("AdvancedBranchAfterDeploy", "Release", 9,
@@ -83,7 +85,8 @@ public class PipelineBranchAdvanceStepTests
         await ExecuteAsync();
 
         Assert.Equal(TaskExecutionStatus.Success, _stepRun.Status);
-        Assert.Contains("already points at 111111111111", Assert.Single(_runLines), StringComparison.Ordinal);
+        Assert.Empty(_runLines);
+        Assert.Contains("already points at 111111111111", Outcome(), StringComparison.Ordinal);
         await _audit.DidNotReceive().LogAsync(
             Arg.Any<string>(), Arg.Any<string>(), Arg.Any<int?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>());
     }
@@ -156,4 +159,7 @@ public class PipelineBranchAdvanceStepTests
         Assert.Equal(TaskExecutionStatus.Failed, _stepRun.Status);
         Assert.Equal("missing 'branch' to advance.", _stepRun.FailureReason);
     }
+
+    private string Outcome() =>
+        System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(_stepRun.OutputVariablesJson!)![PipelineBranchAdvanceStep.OutcomeOutput];
 }

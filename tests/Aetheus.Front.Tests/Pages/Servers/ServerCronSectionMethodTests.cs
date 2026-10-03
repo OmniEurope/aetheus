@@ -65,6 +65,9 @@ public class ServerCronSectionMethodTests
     {
         var (isValid, nextRun, _) = ServerCronSection.ValidateCronExpression("* * * * *");
         Assert.True(isValid);
-        Assert.Contains("-", nextRun);
+        // The next run reads in the user's culture (short date and time), not ISO.
+        Assert.True(DateTime.TryParseExact(nextRun, "g", System.Globalization.CultureInfo.CurrentCulture,
+            System.Globalization.DateTimeStyles.None, out var parsed), nextRun);
+        Assert.InRange(parsed, DateTime.Now.AddMinutes(-1), DateTime.Now.AddMinutes(2));
     }
 }

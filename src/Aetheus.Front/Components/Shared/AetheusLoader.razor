@@ -1,8 +1,28 @@
 @* SPDX-License-Identifier: EUPL-1.2 *@
 @namespace Aetheus.Front.Components.Shared
-@* Recette R-536 (decision of 2026-10-01): the product's one loading indicator is the package's logo
-   loader holding the Aetheus plane. OE floats the mark up and down, never turns it, and holds it still
-   under reduced motion (PLAN-003 D11); this wrapper only gives it the logo, the words and the layout. *@
-<OmniLogoLoader Size="Size" Label="@L["Loading"]" Class="@CssClass">
-    <img src="aetheus-icon.svg" alt="" class="aetheus-loader-logo" />
+@* Recette R-536 (decision of 2026-10-01), R2-075 (2026-10-03): the product's one loading indicator is the
+   package's logo loader holding the Aetheus plane, the boot splash's own animated plane. AnimatedMark
+   (OE 1.5.0) plays the plane's keyframes (p-ship, p-drift, p-roll, p-jet in app.css) instead of floating
+   it; under reduced motion OE and app.css hold it still. This wrapper gives the logo, the words and the
+   layout. *@
+<OmniLogoLoader AnimatedMark="true" Size="Size" Label="@L["Loading"]" Class="@CssClass">
+    <svg class="aetheus-loader-logo" viewBox="0 0 160 160" xmlns="http://www.w3.org/2000/svg">
+        <g class="p-ship">
+            <g class="p-drift">
+                <g transform="translate(80,80) scale(0.92) translate(-80,-80)">
+                    <g transform="translate(102,58) rotate(45)">
+                        <g class="p-roll">
+                            <path d="M0,-69 L62,69 L0,22 L-62,69 Z" fill="#1D4ED8"/>
+                            <path d="M0,-44 L0,14" stroke="#93C5FD" stroke-width="5" stroke-linecap="round" fill="none"/>
+                            <g stroke="#60A5FA" stroke-width="5" stroke-linecap="round" fill="none">
+                                <line class="p-jet" x1="0" y1="36" x2="0" y2="100"/>
+                                <line class="p-jet p-jet-left" x1="-31" y1="48" x2="-44" y2="88"/>
+                                <line class="p-jet p-jet-right" x1="31" y1="48" x2="44" y2="88"/>
+                            </g>
+                        </g>
+                    </g>
+                </g>
+            </g>
+        </g>
+    </svg>
 </OmniLogoLoader>

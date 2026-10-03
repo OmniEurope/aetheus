@@ -15,8 +15,11 @@ public sealed class OperationalRealtimeSurfaceAuditTests
         {
             ["Components/Dashboards/Home.razor.cs"] =
                 ["ServerHeartbeat", "PipelineRunStarted", "EntityChanged", "RejoinOnReconnect"],
+            // Recette R2-056: an agent update refreshes the update count and the task chip.
             ["Components/Servers/Servers.razor.cs"] =
-                ["ServerHeartbeat", "ServerOffline", "RejoinOnReconnect"],
+                ["ServerHeartbeat", "ServerOffline", "AgentUpdateConfirmed", "AgentUpdateFailed", "RejoinOnReconnect"],
+            ["Components/Shared/TaskTrackerService.cs"] =
+                ["TaskCompleted", "AgentUpdateConfirmed", "AgentUpdateFailed", "RejoinOnReconnect"],
             ["Components/Shared/ServerDetailLoader.cs"] =
                 ["Heartbeat", "TaskCompleted", "RejoinOnReconnect"],
             ["Components/Shared/PipelinesList.razor.cs"] =

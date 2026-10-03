@@ -26,11 +26,11 @@ public sealed class AuthStateProviderAnalyticsTests
         await auth.LoginAsync(Jwt(new Dictionary<string, object>
         {
             ["unique_name"] = "sony",
-            ["aetheus:avid"] = "kP3_aQ-opaque-identifier",
+            ["aetheus:avid"] = "opaque-visitor-identifier",
             ["exp"] = DateTimeOffset.UtcNow.AddHours(1).ToUnixTimeSeconds()
         }));
 
-        Assert.Equal("kP3_aQ-opaque-identifier", auth.VisitorForAnalytics());
+        Assert.Equal("opaque-visitor-identifier", auth.VisitorForAnalytics());
         // The measurement is told the visitor changed, before the caller navigates away from the sign-in page.
         await js.Received().InvokeAsync<Microsoft.JSInterop.Infrastructure.IJSVoidResult>(
             "Aetheus.analyticsIdentityChanged", Arg.Any<object?[]?>());
@@ -47,7 +47,7 @@ public sealed class AuthStateProviderAnalyticsTests
 
         await auth.LoginAsync(Jwt(new Dictionary<string, object>
         {
-            ["aetheus:avid"] = "kP3_aQ-opaque-identifier",
+            ["aetheus:avid"] = "opaque-visitor-identifier",
             ["exp"] = DateTimeOffset.UtcNow.AddMinutes(-5).ToUnixTimeSeconds()
         }));
 

@@ -14,6 +14,8 @@ internal static class PipelineDefinitionValidator
         "bluegreen-retire", "bluegreen-revert", "advance-branch"
     };
 
+    internal static bool IsKnownStepType(string type) => KnownTypedStepTypes.Contains(type);
+
     internal static void ValidateDefinitionBasics(
         PipelineYamlDefinition definition,
         ICollection<string> errors,
@@ -223,9 +225,12 @@ internal static class PipelineDefinitionValidator
     {
         if (string.IsNullOrWhiteSpace(step.Name))
             errors.Add($"Step name cannot be empty in {context}.");
-        var isTypedStep = !string.IsNullOrWhiteSpace(step.Type)
-            && KnownTypedStepTypes.Contains(step.Type);
-        if (string.IsNullOrWhiteSpace(step.Shell) && !step.Checkout && !isTypedStep)
+        // Recette R2-041: a type this backend does not know yet (written for a newer one) is a warning,
+        // not an invalid definition, so adding a step type never blocks the delivery that brings it.
+        // The step itself fails visibly if it ever runs here (PipelineStepTaskDispatcher).
+        if (!string.IsNullOrWhiteSpace(step.Type) && !IsKnownStepType(step.Type))
+            warnings.Add($"Step '{step.Name}' in {context} uses the unknown type '{step.Type}'; it fails if it runs on this backend.");
+        else if (string.IsNullOrWhiteSpace(step.Shell) && !step.Checkout && string.IsNullOrWhiteSpace(step.Type))
             errors.Add($"Step '{step.Name}' in {context} must have a shell command or checkout enabled.");
         if (step.RetryCount < 0)
             errors.Add($"Step '{step.Name}' retry_count cannot be negative.");

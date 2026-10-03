@@ -223,6 +223,8 @@ public sealed class AppLogsViewTests : BunitContext
         Assert.Contains("line 1 |", markdown, StringComparison.Ordinal);
         Assert.Contains("line 201 |", markdown, StringComparison.Ordinal);
         Assert.Equal(201, markdown.Split('\n').Count(line => line.Contains("LogSeverityError (17)", StringComparison.Ordinal)));
+        // Every announced line came back, so the file carries no truncation notice.
+        Assert.DoesNotContain("\n> ", markdown, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -281,7 +283,7 @@ public sealed class AppLogsViewTests : BunitContext
     }
 
     [Fact]
-    public void R2009_TheExportBar_HasItsMarkdownButtonBlueWithTheMdIcon_AndCsvGhost()
+    public void R2009_TheExportBar_HasItsMarkdownButtonBlueWithTheMdIcon_AndCsvSecondary()
     {
         BunitTestHelper.RegisterServices(this).SetJsonResponse(LogsUrl, new PaginatedResult<AppLogEntryDto> { Items = Lines(1, 1), TotalCount = 1 });
 
@@ -293,7 +295,8 @@ public sealed class AppLogsViewTests : BunitContext
             .ToArray();
         Assert.Equal(2, buttons.Length);
         // One blue button in the bar, the user's exception (R2-009): Markdown, with the file icon of its format.
-        Assert.Equal([OmniButtonVariant.Primary, OmniButtonVariant.Ghost], buttons.Select(button => button.Instance.Variant));
+        // The other export buttons take OE's default, Secondary since OE 1.5.0 (Ghost before).
+        Assert.Equal([OmniButtonVariant.Primary, OmniButtonVariant.Secondary], buttons.Select(button => button.Instance.Variant));
         Assert.Equal(OmniIconName.FileMd, buttons[0].FindComponent<OmniIcon>().Instance.Name);
         Assert.Equal(OmniIconName.FileCsv, buttons[1].FindComponent<OmniIcon>().Instance.Name);
         Assert.Single(cut.FindAll(".omni-data-grid__export .omni-button--primary"));

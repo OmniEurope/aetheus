@@ -274,6 +274,44 @@ public sealed class PipelineRunPreflightChainTests
     }
 
     [Fact]
+    public async Task AParentValueOnlyKnownOnceAParentStageRuns_ReachesTheChildAsAProvidedEmptyValue()
+    {
+        // aetheus-nightly: BG_BROWSER_IMAGE names an output of its own Prepare demo host. Handed to a
+        // child verbatim, the child's guard saw a reference nothing in the CHILD provides and refused
+        // all six children. The name is provided; only its value is unknown at launch.
+        ChildExists("aetheus-qa", Child());
+        Dictionary<string, string>? seenSeed = null;
+        _variables.ResolveVariablesWithWarningsAsync(
+                Arg.Any<PipelineYamlDefinition>(), Arg.Any<int?>(), Arg.Any<Dictionary<string, string>?>(),
+                Arg.Any<CancellationToken>(), Arg.Any<int?>(), Arg.Any<int?>(), "aetheus-qa",
+                Arg.Any<int?>(), Arg.Any<bool>())
+            .Returns(call =>
+            {
+                seenSeed = call.ArgAt<Dictionary<string, string>?>(2);
+                return Task.FromResult((
+                    new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
+                    new List<string>(),
+                    new HashSet<string>(StringComparer.OrdinalIgnoreCase)));
+            });
+        var parentVariables = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["BG_BROWSER_IMAGE"] = "$(AETHEUS_BROWSER_SMOKE_IMAGE)",
+            ["BG_PROJECT"] = "aetheus-demo",
+            ["WITH_DEFAULT"] = "$(MISSING:-fallback)"
+        };
+
+        await BuildSut().FindBlockingProblemsAsync(
+            Orchestrator("aetheus-qa"), parentVariables, organizationId: 3, projectId: 5,
+            TestContext.Current.CancellationToken);
+
+        Assert.NotNull(seenSeed);
+        Assert.Equal(string.Empty, seenSeed!["BG_BROWSER_IMAGE"]);
+        Assert.Equal("aetheus-demo", seenSeed["BG_PROJECT"]);
+        Assert.Equal("$(MISSING:-fallback)", seenSeed["WITH_DEFAULT"]);
+        Assert.False(seenSeed.ContainsKey("AETHEUS_BROWSER_SMOKE_IMAGE"));
+    }
+
+    [Fact]
     public async Task AChildIsResolvedWithTheReferencesItMustBeAbleToSatisfy()
     {
         // enforceResolvedReferences is what turns "this library entry does not exist" into a refusal

@@ -22,7 +22,8 @@ public class GitBranchProtectionDialogTests : BunitContext
         Assert.Contains("Pattern", cut.Markup);
         Assert.Contains("PreventDeletion", cut.Markup);
         Assert.Contains("PreventForcePush", cut.Markup);
-        Assert.Contains("RequirePR", cut.Markup);
+        // Recette R2-042: "require a pull request" is set aside, never enforced.
+        Assert.DoesNotContain("RequirePR", cut.Markup);
     }
 
     [Fact]
@@ -40,7 +41,8 @@ public class GitBranchProtectionDialogTests : BunitContext
         var cut = Render<GitBranchProtectionDialog>(p => p.Add(x => x.RepoId, 1));
 
         var checkboxes = cut.FindAll("input[type='checkbox']");
-        Assert.True(checkboxes.Count >= 3);
+        // Recette R2-042: prevent deletion and prevent force-push; "require a pull request" is set aside.
+        Assert.Equal(2, checkboxes.Count);
     }
 
     [Fact]

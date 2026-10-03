@@ -167,10 +167,21 @@ public class VariableLibraryService(IVariableLibraryRepository repo, IDbTransact
         return true;
     }
 
+    /// <summary>
+    /// Recette R2-065: a key already in the library is refused with its reason. The unique index
+    /// (VariableLibraryId, Key) used to reject it as an unexplained server error.
+    /// </summary>
+    private async Task EnsureKeyIsFreeAsync(int libraryId, string key, int? exceptEntryId, CancellationToken ct)
+    {
+        if (await repo.EntryKeyExistsAsync(libraryId, key, exceptEntryId, ct).ConfigureAwait(false))
+            throw new BadRequestException($"The key '{key}' already exists in this library.");
+    }
+
     public async Task<VariableEntryDto> CreateEntryAsync(int libraryId, CreateVariableEntryRequest request, CancellationToken ct = default)
     {
         var library = await repo.FindLibraryAsync(libraryId, ct).ConfigureAwait(false);
         if (library is null) throw new NotFoundException("Variable library not found");
+        await EnsureKeyIsFreeAsync(libraryId, request.Key, null, ct).ConfigureAwait(false);
 
         var entry = new VariableLibraryEntry
         {
@@ -193,6 +204,7 @@ public class VariableLibraryService(IVariableLibraryRepository repo, IDbTransact
     {
         var entry = await repo.FindEntryAsync(entryId, ct).ConfigureAwait(false);
         if (entry is null || entry.VariableLibraryId != libraryId) return null;
+        await EnsureKeyIsFreeAsync(libraryId, request.Key, entryId, ct).ConfigureAwait(false);
 
         entry.Key = request.Key;
         entry.Value = request.Value;

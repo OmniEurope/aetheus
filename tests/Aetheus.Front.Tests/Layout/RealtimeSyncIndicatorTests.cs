@@ -40,8 +40,12 @@ public sealed class RealtimeSyncIndicatorTests : BunitContext
         cut.InvokeAsync(() => cut.Instance.OnPageVisibilityChanged(true));
 
         cut.WaitForAssertion(() => Assert.Contains("RealtimeSyncInProgress", cut.Find(Indicator).TextContent));
-        Assert.Equal("status", cut.Find(".omni-notification").GetAttribute("role"));
-        Assert.Empty(cut.FindAll(".omni-notification__dismiss"));
+        // Recette R2-061: a full veil with the animated plane, announced, nothing to dismiss.
+        var veil = cut.Find(Indicator);
+        Assert.Equal("status", veil.GetAttribute("role"));
+        Assert.Equal("true", veil.GetAttribute("aria-busy"));
+        Assert.Single(cut.FindComponents<AetheusLoader>());
+        Assert.Empty(cut.FindAll(".omni-notification"));
 
         catchUp.Dispose();
 

@@ -50,6 +50,9 @@ public interface IUserNotificationRepository
     /// </summary>
     Task<int> AddMissingSubscriptionsAsync(int userId, IReadOnlyCollection<int>? projectIds, CancellationToken ct = default);
 
+    /// <summary>Audit R2-023 follow-up: the active users holding the Admin role.</summary>
+    Task<List<NotificationRecipient>> GetActiveAdministratorsAsync(CancellationToken ct = default);
+
     /// <summary>Recette R2-034: the distinct projects the server is attached to (agent server links).</summary>
     Task<List<int>> GetServerProjectIdsAsync(int serverId, CancellationToken ct = default);
 

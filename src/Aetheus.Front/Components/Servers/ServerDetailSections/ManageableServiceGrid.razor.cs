@@ -65,6 +65,17 @@ public partial class ManageableServiceGrid
 
     private bool IsBusy(string serviceName) => ActionOf(serviceName) is { InFlight: true };
 
+    /// <summary>Recette R2-030: the actions still running on this grid's services, in list order.</summary>
+    private IReadOnlyList<(string Service, ServiceActionState Action)> InFlightActions =>
+        [.. Services.Select(service => (Service: service.Name, Action: ActionOf(service.Name)))
+            .Where(item => item.Action is { InFlight: true })
+            .Select(item => (item.Service, item.Action!))];
+
+    /// <summary>"Installation de « nginx » en cours…", or "en attente de l'agent" before it starts.</summary>
+    internal string InFlightText(string service, ServiceActionState action) => string.Format(
+        L[action.Phase == ServiceActionPhase.Queued ? "ServiceActionQueuedBanner" : "ServiceActionRunningBanner"],
+        L[$"ServiceActionNoun{action.ActionKey}"], service);
+
     private string ActionText(ServiceActionState action) => action.Phase switch
     {
         ServiceActionPhase.Queued => string.Format(L["ServiceActionQueued"], L[action.ActionKey]),

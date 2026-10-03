@@ -7,7 +7,8 @@ namespace Aetheus.Front.Components.Servers;
 /// Recette R-507: what a service's raw status means to a reader. The agent reports what the host says
 /// (systemd's sub-state or unit-file state, a Windows service state, "installed" for a binary found
 /// without a unit); the page used to print that word as is, in red for anything but "running", so a
-/// service that is simply stopped looked like a fault. Stopped is neutral, only a failure is red.
+/// service that is simply stopped looked like a fault. The words are translated; since recette R2-058
+/// (2026-10-02) the user wants a stopped service red again and a running one blue, see <see cref="Tone"/>.
 /// </summary>
 internal static class ServiceStatusPresentation
 {
@@ -41,11 +42,14 @@ internal static class ServiceStatusPresentation
         return Stopped.Contains(status) ? "ServiceStatusStopped" : null;
     }
 
+    /// <summary>Recette R2-058 (2026-10-02, exception chosen by the user over R-507): a running service
+    /// reads blue and a stopped one red; a scheduled one moves to Info so it does not read as running.
+    /// Masked and idle stay neutral: neither is up nor down.</summary>
     internal static OmniTone Tone(string status, bool isRunning) => LabelKey(status, isRunning) switch
     {
-        "ServiceStatusRunning" => OmniTone.Success,
-        "ServiceStatusFailed" => OmniTone.Danger,
-        "ServiceStatusScheduled" => OmniTone.Accent,
+        "ServiceStatusRunning" => OmniTone.Accent,
+        "ServiceStatusFailed" or "ServiceStatusStopped" => OmniTone.Danger,
+        "ServiceStatusScheduled" => OmniTone.Info,
         "ServiceStatusStarting" or "ServiceStatusStopping" => OmniTone.Warning,
         _ => OmniTone.Neutral
     };

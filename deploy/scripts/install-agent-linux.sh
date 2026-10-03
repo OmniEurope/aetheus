@@ -37,20 +37,18 @@ AGENT_USER="aetheus-agent"
 AGENT_GROUP="aetheus-agent"
 INSTALL_DIR="/opt/aetheus-agent"
 WORK_DIR="/var/lib/aetheus-agent"
-# These three are the host layout, which the deployment pipelines read from their Variable Libraries.
+# These are the host layout, which the deployment pipelines read from their Variable Libraries.
 # They are defaults here rather than constants so a host that names them differently can say so at
-# install time (--production-state-dir, --demo-state-dir, --acme-webroot) instead of needing an
-# edited copy of this script. Nothing else changes: the installer still owns creating them, because
+# install time (--production-state-dir, --acme-webroot) instead of needing an edited copy of this
+# script. Nothing else changes: the installer still owns creating them, because
 # the deployment runs as the agent user and cannot create a directory under /var/lib.
 PRODUCTION_STATE_DIR="${AETHEUS_PRODUCTION_STATE_DIR:-/var/lib/aetheus-production}"
 PRODUCTION_ENV_FILE="$PRODUCTION_STATE_DIR/.env-prod"
 LEGACY_PRODUCTION_ENV_FILE="$WORK_DIR/aetheus-prod/.env-prod"
-# The nightly demo deployment keeps its Compose environment and secrets here, exactly as production
-# does above. It is created by the installer and not by the deployment, because the deployment runs
-# as the agent user, which cannot create a directory under /var/lib: the nightly failed on both the
-# mirror and the production host with "State directory /var/lib/aetheus-demo does not exist and
-# could not be created". No secrets are generated or migrated here - the demo preparation owns that.
-DEMO_STATE_DIR="${AETHEUS_DEMO_STATE_DIR:-/var/lib/aetheus-demo}"
+# Only production Aetheus has a state directory on the host (user decision, 2026-10-02). The demo
+# and the nightly QA keep theirs in the run's workspace, which the agent owns, so nothing is created
+# for them here any more. A directory an older installer created (/var/lib/aetheus-demo,
+# /var/lib/aetheus-nightly) is left as it is: removing data is the operator's call.
 SERVICE_NAME="aetheus-agent"
 AGENT_POSTURE_VERSION="2"
 AGENT_POSTURE_VERSION_FILE="/etc/aetheus-agent-posture-version"
@@ -579,8 +577,10 @@ while [ "$#" -gt 0 ]; do
             PRODUCTION_STATE_DIR="$(require_state_dir "$2" production)"
             PRODUCTION_ENV_FILE="$PRODUCTION_STATE_DIR/.env-prod"
             shift 2 ;;
-        --demo-state-dir)
-            DEMO_STATE_DIR="$(require_state_dir "$2" demo)"
+        # Obsolete since 2026-10-02 (the demo and the QA keep their state in the run workspace).
+        # Still accepted so an existing install command does not break, and said to do nothing.
+        --demo-state-dir|--nightly-state-dir)
+            echo "Ignoring $1: the demo and the nightly QA no longer have a state directory on the host." >&2
             shift 2 ;;
         --acme-webroot)
             ACME_WEBROOT_OVERRIDE="$(require_web_root "$2")"
@@ -1851,6 +1851,26 @@ ProtectSystem=false"
         fi
     fi
 
+    # Home directories stay out of reach. The certbot helpers are the one exception: snap-packaged
+    # certbot refuses to start unless it can create /root/snap/certbot/<revision> ("cannot create user
+    # data directory ... Permission denied"), so with --enable-certbot-manage the homes are an empty
+    # tmpfs and only /root/snap is bound in. Without it, every new or renewed certificate failed under
+    # this unit (aetheus-nightly 2503, qa.app and qa.api, 2026-10-02).
+    #
+    # An agent self-update runs this script from aetheus-agent-upgrade.service, which hides the homes
+    # itself (ProtectHome=true): /root is read-only there, and a plain mkdir aborted the upgrade, which
+    # then rolled back to the old agent (1.2.398 -> 1.2.402, 2026-10-03). The directory is created when
+    # the homes are reachable; the leading '-' lets the unit start without it, certbot then failing as
+    # it did before rather than the whole agent.
+    PROTECT_HOME_BLOCK="ProtectHome=true"
+    if [ "$ENABLE_CERTBOT_MANAGE" -eq 1 ]; then
+        if ! mkdir -p /root/snap 2>/dev/null; then
+            echo "WARNING: /root/snap cannot be created here (homes hidden); snap certbot needs it, run the installer outside the upgrade worker to create it." >&2
+        fi
+        PROTECT_HOME_BLOCK="ProtectHome=tmpfs
+BindPaths=-/root/snap"
+    fi
+
     # A deployment target needs an ACL mask with execute on the private state directory so the
     # named aetheus-deploy ACL can traverse to $DEPLOY_BASE_DIR. Without deployment, keep 0700.
     STATE_DIRECTORY_MODE="0700"
@@ -2465,12 +2485,6 @@ if [ -d "$PRODUCTION_STATE_DIR" ]; then
     chown -R "$AGENT_USER:$AGENT_GROUP" "$PRODUCTION_STATE_DIR"
     chmod 700 "$PRODUCTION_STATE_DIR"
 fi
-# Same treatment for the demo state root: create it if it is absent, and hand it to the agent user
-# so the nightly can write its environment file without ever needing root at deployment time.
-install -d -m 700 "$DEMO_STATE_DIR"
-chown -R "$AGENT_USER:$AGENT_GROUP" "$DEMO_STATE_DIR"
-chmod 700 "$DEMO_STATE_DIR"
-
 # --- Add agent user to docker group (required for container/image collection) ---
 ensure_docker_group
 

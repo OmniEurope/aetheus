@@ -30,7 +30,7 @@ internal sealed class ServerHeartbeatProcessor(
 {
     private static readonly ConcurrentDictionary<int, DateTime> DeploymentBuildAlerts = new();
     private static readonly TimeSpan DeploymentBuildAlertCooldown = TimeSpan.FromMinutes(15);
-    private readonly SudoersDriftMonitor _sudoersDrift = new(alertHub, timeProvider, logger);
+    private readonly SudoersDriftMonitor _sudoersDrift = new(alertHub, timeProvider, domainEvents, logger);
 
     public async Task ProcessHeartbeatAsync(int serverId, ServerHeartbeatDto heartbeat, CancellationToken ct = default)
     {

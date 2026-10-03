@@ -86,7 +86,7 @@
             <OmniDataGridColumn Frozen="true" TItem="SystemLogEntryDto" Property="Timestamp"
                                 Title="@L["Timestamp"]" Width="11.25rem" Filterable="true"
                                 FilterType="OmniDataGridColumnFilterType.DateRange" FilterIncludesTime="true"
-                                FormatString="{0:yyyy-MM-dd HH:mm:ss.fff}" />
+                                FormatString="@DateDisplay.PreciseFormatString" />
             <OmniDataGridColumn TItem="SystemLogEntryDto" Property="Level"
                                 Title="@L["LogLevel"]" Width="7.5rem" Filterable="true"
                                 FilterType="OmniDataGridColumnFilterType.MultiSelect" FilterValues="@LevelsArray" FormatFilterValue="@LevelText">

@@ -200,6 +200,13 @@ public sealed class UserNotificationRepository(AppDbContext db) : IUserNotificat
         return missing.Count;
     }
 
+    public Task<List<NotificationRecipient>> GetActiveAdministratorsAsync(CancellationToken ct = default) =>
+        db.Users.AsNoTracking()
+            .Where(user => user.IsActive && user.UserRoles.Any(link => link.Role.Name == "Admin"))
+            .OrderBy(user => user.Id)
+            .Select(user => new NotificationRecipient(user.Id, user.Username))
+            .ToListAsync(ct);
+
     public Task<List<int>> GetServerProjectIdsAsync(int serverId, CancellationToken ct = default) =>
         db.ProjectServers.AsNoTracking()
             .Where(link => link.ServerId == serverId)

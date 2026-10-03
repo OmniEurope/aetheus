@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Globalization;
 using Aetheus.Back.Components.Artifacts;
+using Aetheus.Back.Data;
 using Aetheus.Back.Hubs;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using NSubstitute;
@@ -22,7 +25,7 @@ public sealed class ArtifactStorageMonitorServiceTests
             var (hub, proxy) = AlertHub();
             var service = new ArtifactStorageMonitorService(
                 Configuration(root.FullName, budgetBytes: 16, growthWarningBytesPerDay: 0),
-                hub, TimeProvider.System, NullLogger<ArtifactStorageMonitorService>.Instance);
+                hub, Measurements(), TimeProvider.System, NullLogger<ArtifactStorageMonitorService>.Instance);
             AlertTriggeredDto? alert = null;
             proxy.SendCoreAsync("AlertTriggered", Arg.Do<object?[]>(arguments =>
                     alert = Assert.IsType<AlertTriggeredDto>(arguments[0])), Arg.Any<CancellationToken>())
@@ -57,7 +60,7 @@ public sealed class ArtifactStorageMonitorServiceTests
             var time = new FakeTimeProvider(new DateTimeOffset(2026, 10, 1, 0, 0, 0, TimeSpan.Zero));
             var service = new ArtifactStorageMonitorService(
                 Configuration(root.FullName, budgetBytes: 500, growthWarningBytesPerDay: 50),
-                hub, time, NullLogger<ArtifactStorageMonitorService>.Instance);
+                hub, Measurements(), time, NullLogger<ArtifactStorageMonitorService>.Instance);
 
             await service.EvaluateAsync(TestContext.Current.CancellationToken);
             // +20 bytes in one hour: the former normalisation (x24) read 480 bytes per day against 50.
@@ -86,7 +89,7 @@ public sealed class ArtifactStorageMonitorServiceTests
             var time = new FakeTimeProvider(new DateTimeOffset(2026, 7, 17, 10, 0, 0, TimeSpan.Zero));
             var service = new ArtifactStorageMonitorService(
                 Configuration(root.FullName, budgetBytes: 1000, growthWarningBytesPerDay: 100),
-                hub, time, NullLogger<ArtifactStorageMonitorService>.Instance);
+                hub, Measurements(), time, NullLogger<ArtifactStorageMonitorService>.Instance);
 
             await service.EvaluateAsync(TestContext.Current.CancellationToken);
             await proxy.DidNotReceive().SendCoreAsync(
@@ -127,7 +130,7 @@ public sealed class ArtifactStorageMonitorServiceTests
             var time = new FakeTimeProvider(new DateTimeOffset(2026, 7, 17, 10, 0, 0, TimeSpan.Zero));
             var service = new ArtifactStorageMonitorService(
                 Configuration(root.FullName, budgetBytes: 100_000, growthWarningBytesPerDay: 100),
-                hub, time, NullLogger<ArtifactStorageMonitorService>.Instance);
+                hub, Measurements(), time, NullLogger<ArtifactStorageMonitorService>.Instance);
 
             await service.EvaluateAsync(TestContext.Current.CancellationToken);
             // 200 bytes per day, budget reached in about 500 days: no real risk.
@@ -161,6 +164,88 @@ public sealed class ArtifactStorageMonitorServiceTests
         Assert.Equal(7.5, ArtifactStorageMonitorService.DaysUntilBudget(10_000, 55_000, 6_000));
         Assert.Null(ArtifactStorageMonitorService.DaysUntilBudget(10_000, 0, 6_000));
         Assert.Null(ArtifactStorageMonitorService.DaysUntilBudget(10_000, 55_000, 0));
+    }
+
+    [Fact]
+    public async Task R2016_AfterARestart_TheGrowthIsMeasuredAgainstThePersistedMeasurement()
+    {
+        var root = Directory.CreateTempSubdirectory("aetheus-artifact-restart-");
+        try
+        {
+            var artifact = Path.Combine(root.FullName, "artifact.bin");
+            await File.WriteAllBytesAsync(artifact, [], cancellationToken: TestContext.Current.CancellationToken);
+            var (hub, proxy) = AlertHub();
+            var time = new FakeTimeProvider(new DateTimeOffset(2026, 10, 1, 10, 0, 0, TimeSpan.Zero));
+            var database = Measurements();
+            var configuration = Configuration(root.FullName, budgetBytes: 1000, growthWarningBytesPerDay: 100);
+
+            await new ArtifactStorageMonitorService(configuration, hub, database, time,
+                NullLogger<ArtifactStorageMonitorService>.Instance).EvaluateAsync(TestContext.Current.CancellationToken);
+
+            // A deploy every few hours: each new process measures once, none of them holds a day of
+            // history in memory, yet the fourth one sees the growth of the last 24 hours.
+            for (var deploy = 0; deploy < 3; deploy++)
+            {
+                time.Advance(TimeSpan.FromHours(8));
+                await File.WriteAllBytesAsync(artifact, new byte[70 * (deploy + 1)], cancellationToken: TestContext.Current.CancellationToken);
+                await new ArtifactStorageMonitorService(configuration, hub, database, time,
+                    NullLogger<ArtifactStorageMonitorService>.Instance).EvaluateAsync(TestContext.Current.CancellationToken);
+            }
+
+            await proxy.Received(1).SendCoreAsync(
+                "AlertTriggered",
+                Arg.Is<object?[]>(arguments =>
+                    ((AlertTriggeredDto)arguments[0]!).Severity == "Warning"
+                    && ((AlertTriggeredDto)arguments[0]!).Threshold == 100),
+                Arg.Any<CancellationToken>());
+        }
+        finally
+        {
+            root.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task R2016_PersistedHistory_KeepsTheNewestMeasurementADayOldAndWhatFollowsIt()
+    {
+        var root = Directory.CreateTempSubdirectory("aetheus-artifact-prune-");
+        try
+        {
+            var (hub, _) = AlertHub();
+            var time = new FakeTimeProvider(new DateTimeOffset(2026, 10, 1, 0, 0, 0, TimeSpan.Zero));
+            var database = Measurements();
+            var configuration = Configuration(root.FullName, budgetBytes: 0, growthWarningBytesPerDay: 0);
+            var start = time.GetUtcNow().UtcDateTime;
+
+            for (var hour = 0; hour <= 30; hour += 6)
+            {
+                await new ArtifactStorageMonitorService(configuration, hub, database, time,
+                    NullLogger<ArtifactStorageMonitorService>.Instance).EvaluateAsync(TestContext.Current.CancellationToken);
+                time.Advance(TimeSpan.FromHours(6));
+            }
+
+            await using var scope = database.CreateAsyncScope();
+            var kept = await scope.ServiceProvider.GetRequiredService<IArtifactStorageMeasurementRepository>()
+                .GetAsync(TestContext.Current.CancellationToken);
+            // Measured at 0, 6, 12, 18, 24 and 30 h: at 30 h the newest measurement 24 h old is the one of
+            // 6 h, so only the one of 0 h is gone.
+            Assert.Equal([6, 12, 18, 24, 30], kept.Select(item => (int)(item.At - start).TotalHours));
+        }
+        finally
+        {
+            root.Delete(recursive: true);
+        }
+    }
+
+    /// <summary>A scope factory over one in-memory database, shared by every service built from it the
+    /// way the blue-green colours and successive deploys share the production database.</summary>
+    private static IServiceScopeFactory Measurements()
+    {
+        var databaseName = Guid.NewGuid().ToString("N");
+        var services = new ServiceCollection();
+        services.AddDbContext<AppDbContext>(options => options.UseInMemoryDatabase(databaseName));
+        services.AddScoped<IArtifactStorageMeasurementRepository, ArtifactStorageMeasurementRepository>();
+        return services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>();
     }
 
     private static IConfiguration Configuration(string basePath, long budgetBytes, long growthWarningBytesPerDay) =>

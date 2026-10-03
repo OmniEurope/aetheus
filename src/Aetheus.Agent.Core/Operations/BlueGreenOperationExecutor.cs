@@ -90,9 +90,9 @@ public sealed class BlueGreenOperationExecutor(
         return kind switch
         {
             OperationKind.BlueGreenMigrate => await MigrateAsync(context!, journal, envVars, timeoutSeconds, onOutput, ct).ConfigureAwait(false),
-            OperationKind.BlueGreenUp => await UpAsync(context!, journal, timeoutSeconds, onOutput, ct).ConfigureAwait(false),
+            OperationKind.BlueGreenUp => await UpAsync(context!, journal, envVars, timeoutSeconds, onOutput, ct).ConfigureAwait(false),
             OperationKind.BlueGreenSwitch => await SwitchAsync(context!, journal, envVars, timeoutSeconds, onOutput, ct).ConfigureAwait(false),
-            OperationKind.BlueGreenRollback => await RollbackAsync(context!, journal, envVars, timeoutSeconds, onOutput, ct).ConfigureAwait(false),
+            OperationKind.BlueGreenRollback => await RollbackAsync(context!, journal, envVars, timeoutSeconds, onOutput, ct, recoveringOrphan: false).ConfigureAwait(false),
             OperationKind.BlueGreenRetire => await RetireAsync(context!, journal, envVars, timeoutSeconds, onOutput, ct).ConfigureAwait(false),
             OperationKind.BlueGreenRevert => await _revert.RevertAsync(
                 context!, journal, envVars, timeoutSeconds,
@@ -211,9 +211,15 @@ public sealed class BlueGreenOperationExecutor(
 
     // ── Up ──────────────────────────────────────────────────────────────────────────────────────
     private async Task<ExecutorResult> UpAsync(
-        BlueGreenContext context, BlueGreenJournal journal, int timeoutSeconds,
+        BlueGreenContext context, BlueGreenJournal journal, IReadOnlyDictionary<string, string> envVars, int timeoutSeconds,
         Func<string, TaskLogLevel, Task> onOutput, CancellationToken ct)
     {
+        // Before anything is rebuilt: the idle colour may be what another run's open transaction falls back to.
+        if (await BlueGreenTransactionOwnership.SettleAnotherRunsTransactionAsync(
+                journal, envVars, () => RollbackAsync(context, journal, envVars, timeoutSeconds, onOutput, ct, recoveringOrphan: true),
+                onOutput).ConfigureAwait(false) is { } refused)
+            return refused;
+
         var live = journal.ReadLiveColour();
         var idle = live is null ? "blue" : BlueGreenContext.Opposite(live);
         await onOutput(
@@ -311,7 +317,7 @@ public sealed class BlueGreenOperationExecutor(
             return new ExecutorResult(-1, false);
         }
 
-        if (!journal.TryOpen(live ?? "none", idle, revision, out var journalError))
+        if (!journal.TryOpen(live ?? "none", idle, revision, BlueGreenTransactionOwnership.OwnerOf(envVars), out var journalError))
         {
             await onOutput(journalError, TaskLogLevel.Error).ConfigureAwait(false);
             return new ExecutorResult(1, false);
@@ -484,7 +490,7 @@ public sealed class BlueGreenOperationExecutor(
 
     private async Task<ExecutorResult> RollbackAsync(
         BlueGreenContext context, BlueGreenJournal journal, IReadOnlyDictionary<string, string> envVars,
-        int timeoutSeconds, Func<string, TaskLogLevel, Task> onOutput, CancellationToken ct)
+        int timeoutSeconds, Func<string, TaskLogLevel, Task> onOutput, CancellationToken ct, bool recoveringOrphan)
     {
         var state = journal.Exists ? journal.State : null;
         if (state is null or BlueGreenJournal.Committed)
@@ -492,6 +498,10 @@ public sealed class BlueGreenOperationExecutor(
             await onOutput("No open deployment transaction; nothing to undo.", TaskLogLevel.Info).ConfigureAwait(false);
             return new ExecutorResult(0, false);
         }
+        // A failed run undoes its own deployment, never another run's (decision of 2026-10-02).
+        if (!recoveringOrphan
+            && await BlueGreenTransactionOwnership.RefuseAnotherRunsRollbackAsync(journal, envVars, onOutput).ConfigureAwait(false) is { } notOurs)
+            return notOurs;
         if (state is not (BlueGreenJournal.Prepared or BlueGreenJournal.Switched))
         {
             await onOutput(

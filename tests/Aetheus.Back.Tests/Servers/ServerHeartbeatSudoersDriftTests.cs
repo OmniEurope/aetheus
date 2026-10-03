@@ -2,11 +2,14 @@
 using Aetheus.Back.Components.AgentUpdate;
 using Aetheus.Back.Components.Audit;
 using Aetheus.Back.Components.Servers;
+using Aetheus.Back.Components.Servers.Events;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Hubs;
 using Aetheus.Back.Services;
+using Aetheus.Back.Services.DomainEvents;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Time.Testing;
 using NSubstitute;
 
 namespace Aetheus.Back.Tests.Servers;
@@ -30,6 +33,8 @@ public sealed class ServerHeartbeatSudoersDriftTests
     private readonly IClientProxy _alertProxy = Substitute.For<IClientProxy>();
     private readonly IAgentUpdateConfirmationService _confirmation = Substitute.For<IAgentUpdateConfirmationService>();
     private readonly Server _server = new() { Id = 7, Name = "web-1", Hostname = "web-1" };
+    private readonly FakeTimeProvider _time = new(new DateTimeOffset(2026, 10, 1, 8, 0, 0, TimeSpan.Zero));
+    private readonly IDomainEventDispatcher _events = Substitute.For<IDomainEventDispatcher>();
 
     public ServerHeartbeatSudoersDriftTests()
     {
@@ -49,9 +54,15 @@ public sealed class ServerHeartbeatSudoersDriftTests
         alertHub.Clients.Returns(_alertClients);
         return new ServerService(_repo, Substitute.For<IServerHeartbeatRepository>(), hub, alertHub,
             Substitute.For<IAuditService>(), Substitute.For<Aetheus.Back.Components.Tasks.ITaskService>(),
-            Options.Create(new BackgroundServicesOptions()), TimeProvider.System,
-            Substitute.For<IDbTransactionScope>(), updateConfirmation: _confirmation);
+            Options.Create(new BackgroundServicesOptions()), _time,
+            Substitute.For<IDbTransactionScope>(), updateConfirmation: _confirmation, domainEvents: _events);
     }
+
+    private List<SudoersDriftDetectedEvent> DriftEvents() => _events.ReceivedCalls()
+        .Where(call => call.GetMethodInfo().Name == nameof(IDomainEventDispatcher.DispatchAsync))
+        .Select(call => call.GetArguments()[0])
+        .OfType<SudoersDriftDetectedEvent>()
+        .ToList();
 
     private Task HeartbeatAsync(params (string File, string Hash)[] hashes) =>
         CreateService().ProcessHeartbeatAsync(_server.Id, new ServerHeartbeatDto
@@ -162,5 +173,63 @@ public sealed class ServerHeartbeatSudoersDriftTests
         await HeartbeatAsync((Agent, HashC));
 
         Assert.Equal(2, DriftAlerts().Count);
+    }
+
+    [Fact]
+    public async Task Drift_IsDispatchedForPersistence_AndRaisedAgainEverySixHoursWhileItLasts()
+    {
+        await HeartbeatAsync((Agent, HashA));
+        await HeartbeatAsync((Agent, HashC));
+        var firstAlertAt = _time.GetUtcNow().UtcDateTime;
+
+        _time.Advance(TimeSpan.FromHours(6) - TimeSpan.FromMinutes(1));
+        await HeartbeatAsync((Agent, HashC));
+        Assert.Single(DriftAlerts());
+        Assert.Equal(firstAlertAt, _server.SudoersDriftAlertedAt);
+
+        _time.Advance(TimeSpan.FromMinutes(1));
+        await HeartbeatAsync((Agent, HashC));
+        await HeartbeatAsync((Agent, HashC));
+
+        Assert.Equal(2, DriftAlerts().Count);
+        var events = DriftEvents();
+        Assert.Equal(2, events.Count);
+        Assert.False(events[0].IsReminder);
+        Assert.True(events[1].IsReminder);
+        Assert.All(events, item =>
+        {
+            Assert.Equal(_server.Id, item.ServerId);
+            Assert.Equal("web-1", item.ServerName);
+            Assert.Equal(Agent, item.Files);
+            Assert.Contains("changed out-of-band", item.Message, StringComparison.Ordinal);
+        });
+        Assert.Equal(_time.GetUtcNow().UtcDateTime, _server.SudoersDriftAlertedAt);
+    }
+
+    [Fact]
+    public async Task DriftAlertedBeforeTheAlertDateExisted_IsRaisedAgainOnce()
+    {
+        await HeartbeatAsync((Agent, HashA));
+        await HeartbeatAsync((Agent, HashC));
+        // The row as the migration leaves it: fingerprint kept, no alert date.
+        _server.SudoersDriftAlertedAt = null;
+
+        await HeartbeatAsync((Agent, HashC));
+        await HeartbeatAsync((Agent, HashC));
+
+        Assert.Equal(2, DriftAlerts().Count);
+        Assert.True(DriftEvents()[1].IsReminder);
+    }
+
+    [Fact]
+    public async Task ReturnToBaseline_ClearsTheAlertDate()
+    {
+        await HeartbeatAsync((Agent, HashA));
+        await HeartbeatAsync((Agent, HashC));
+        Assert.NotNull(_server.SudoersDriftAlertedAt);
+
+        await HeartbeatAsync((Agent, HashA));
+
+        Assert.Null(_server.SudoersDriftAlertedAt);
     }
 }

@@ -54,6 +54,19 @@ public class ServerMailSectionRenderTests : BunitContext
     // ── Render ────────────────────────────────────────────────────────────────
 
     [Fact]
+    public void R2_059_AnUnconfiguredMailStack_SaysSo_AndGuidesTheSetup()
+    {
+        var cut = RenderSection(MakeMailServer(installed: false));
+
+        Assert.Contains("MailNotConfigured", cut.Markup, StringComparison.Ordinal);
+        Assert.DoesNotContain(">NotInstalled<", cut.Markup, StringComparison.Ordinal);
+        var guide = cut.Find(".mail-setup-guide");
+        Assert.Equal(4, guide.QuerySelectorAll(".mail-setup-guide-steps > li").Length);
+        Assert.Contains("MailGuidePrerequisites", guide.TextContent, StringComparison.Ordinal);
+        Assert.Contains(cut.FindAll("button"), button => button.TextContent.Contains("MailSetupAction", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void Renders_InstalledMail_ShowsPostfixVersion()
     {
         var cut = RenderSection();
@@ -118,7 +131,13 @@ public class ServerMailSectionRenderTests : BunitContext
         var cut = Render<MailOperationDialog>(p => p
             .Add(x => x.Mode, MailDialogMode.Setup)
             .Add(x => x.ServerId, 10)
-            .Add(x => x.Model, new MailDialogModel { Domain = "example.com" }));
+            .Add(x => x.Model, new MailDialogModel
+            {
+                Hostname = "mx.example.com",
+                Domain = "example.com",
+                Email = "postmaster@example.com",
+                Password = "a-long-enough-password"
+            }));
 
         cut.FindAll("button").First(button => button.TextContent.Contains("MailCheckCurrentRouting", StringComparison.Ordinal)).Click();
 
@@ -129,6 +148,39 @@ public class ServerMailSectionRenderTests : BunitContext
         cut.FindAll("button").First(button => button.TextContent.Contains("Next", StringComparison.Ordinal)).Click();
         Assert.DoesNotContain("MailOvhRoutingNotice", cut.Markup);
         Assert.Contains("MailSetupSummary", cut.Markup);
+    }
+
+    [Fact]
+    public void R2_060_TheSetupSteps_AreNumberedOneToThree_AndEachFieldExplainsItself()
+    {
+        var cut = Render<MailOperationDialog>(p => p
+            .Add(x => x.Mode, MailDialogMode.Setup)
+            .Add(x => x.Model, new MailDialogModel()));
+
+        var steps = cut.FindComponents<OmniStepsItem>();
+        Assert.Equal(["MailSetupStepServer", "MailSetupStepAdmin", "MailSetupStepOptions"], steps.Select(step => step.Instance.Title).ToArray());
+        Assert.DoesNotContain(">4<", cut.Find(".mail-setup-steps").InnerHtml, StringComparison.Ordinal);
+        Assert.Equal(["MailHostnameHelp", "MailDomainHelp", "MailDkimSelectorHelp"],
+            cut.FindComponents<OmniFormField>().Select(field => field.Instance.Help).Where(help => help is not null).ToArray());
+    }
+
+    [Fact]
+    public void R2_060_Next_RefusesABareHostName_AndStaysOnTheStep()
+    {
+        var cut = Render<MailOperationDialog>(p => p
+            .Add(x => x.Mode, MailDialogMode.Setup)
+            .Add(x => x.Model, new MailDialogModel { Hostname = "vps2577917", Domain = "example.com" }));
+
+        cut.FindAll("button").First(button => button.TextContent.Contains("Next", StringComparison.Ordinal)).Click();
+
+        Assert.Contains("MailHostnameInvalid", cut.Find(".mail-setup-step-errors").TextContent, StringComparison.Ordinal);
+        Assert.NotEmpty(cut.FindAll("#oe-formfield-pages-servers-serverdetailsections-mailoperationdialog-11"));
+
+        cut.Find("#oe-formfield-pages-servers-serverdetailsections-mailoperationdialog-11").Input("mx.example.com");
+        cut.FindAll("button").First(button => button.TextContent.Contains("Next", StringComparison.Ordinal)).Click();
+
+        Assert.Empty(cut.FindAll(".mail-setup-step-errors"));
+        Assert.NotEmpty(cut.FindAll("#oe-formfield-pages-servers-serverdetailsections-mailoperationdialog-14"));
     }
 
     [Fact]

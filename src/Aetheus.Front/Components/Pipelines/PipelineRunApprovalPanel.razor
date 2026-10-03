@@ -28,10 +28,18 @@
         else
         {
         <OmniStack Orientation="OmniStackOrientation.Vertical" Gap="OmniSpacing.Small" Class="omni-u-mt-md role-edit-stack">
-            <OmniTextArea aria-label="@L["ApprovalCommentsOptional"]" @bind-Value="Approval.Comments" Placeholder="@L["ApprovalCommentsOptional"]" Rows="2" Class="omni-u-w-100" />
+            @* Recette R2-046: the comment field appears on request; Approve and Reject stay the two decisions. *@
+            @if (CommentOpen)
+            {
+                <OmniTextArea aria-label="@L["ApprovalCommentsOptional"]" @bind-Value="Approval.Comments" Placeholder="@L["ApprovalCommentsOptional"]" Rows="2" Class="omni-u-w-100 approval-comment" />
+            }
             <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.Small">
                 <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@(() => Approval.DecideAsync(ApprovalStatus.Approved))" Class="@(Approval.Deciding ? "btn-busy" : null)" Busy="@(Approval.Deciding)"><OmniIcon Name="OmniIconName.CheckCircle" /> <span>@L["Approve"]</span></OmniButton>
                 <OmniButton Variant="OmniButtonVariant.Danger" OnClick="@(() => Approval.DecideAsync(ApprovalStatus.Rejected))" Class="@(Approval.Deciding ? "btn-busy" : null)" Busy="@(Approval.Deciding)"><OmniIcon Name="OmniIconName.Prohibit" /> <span>@L["Reject"]</span></OmniButton>
+                @if (!CommentOpen)
+                {
+                    <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@OpenComment" Disabled="@(Approval.Deciding)" Class="approval-add-comment"><OmniIcon Name="OmniIconName.Chat" /> <span>@L["ApprovalAddComment"]</span></OmniButton>
+                }
             </OmniStack>
         </OmniStack>
         }

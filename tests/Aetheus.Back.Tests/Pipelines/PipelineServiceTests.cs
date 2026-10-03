@@ -1333,6 +1333,69 @@ public class PipelineServiceTests
     }
 
     [Fact]
+    public void ValidateYamlStrict_AMisspelledGuardKey_IsRefused_NotSkipped()
+    {
+        var yaml = """
+            name: deploy
+            trigger: manual
+            stages:
+              - name: confirm
+                agent: linux-01
+                approval_timeout_minuts: 10
+                steps:
+                  - name: compile
+                    shell: dotnet build
+            """;
+
+        var result = _sut.ValidateYamlStrict(yaml);
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Errors, error =>
+            error.Contains("'approval_timeout_minuts'", StringComparison.Ordinal)
+            && error.Contains("'approval_timeout_minutes'", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ValidateYamlStrict_AStepTypeOfANewerBackend_IsAcceptedWithAWarning()
+    {
+        var yaml = """
+            name: deploy
+            trigger: manual
+            stages:
+              - name: release
+                agent: linux-01
+                steps:
+                  - name: future step
+                    type: publish-to-the-moon
+            """;
+
+        var result = _sut.ValidateYamlStrict(yaml);
+
+        Assert.True(result.IsValid, string.Join(" | ", result.Errors));
+        Assert.Contains(result.Warnings, warning =>
+            warning.Contains("unknown type 'publish-to-the-moon'", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ValidateYamlStrict_AStepWithNeitherTypeNorShell_IsStillRefused()
+    {
+        var yaml = """
+            name: deploy
+            trigger: manual
+            stages:
+              - name: build
+                agent: linux-01
+                steps:
+                  - name: empty
+            """;
+
+        var result = _sut.ValidateYamlStrict(yaml);
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Errors, error => error.Contains("must have a shell command", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void ValidateYamlStrict_UnknownStageProperty_IsAcceptedWithAWarning()
     {
         var yaml = """

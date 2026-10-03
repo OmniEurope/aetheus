@@ -80,11 +80,14 @@ public sealed class PipelineRunControlService(
             return false;
 
         var definition = current.Pipeline is null ? null : definitions.Parse(current);
+        // always() teardown, and the failed() stage that rolls a deployment back (decision of
+        // 2026-10-02): a cancelled run must not leave an open blue-green transaction behind it.
         var preservedStages = definition is null
             ? new HashSet<string>(StringComparer.OrdinalIgnoreCase)
             : YamlParsingHelper.FlattenJobs(definition)
                 .Where(stage => string.Equals(
-                    stage.Condition?.Trim(), "always()", StringComparison.OrdinalIgnoreCase))
+                        stage.Condition?.Trim(), "always()", StringComparison.OrdinalIgnoreCase)
+                    || IsDeploymentRollback(stage))
                 .Select(stage => stage.Name)
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
         preservedStages.Add(PipelineSystemStages.Cleanup);
@@ -106,6 +109,10 @@ public sealed class PipelineRunControlService(
             await scheduler.AdvanceToNextStageOrCompleteAsync(current.Id, launcher, ct).ConfigureAwait(false);
         return true;
     }
+
+    internal static bool IsDeploymentRollback(PipelineStageDefinition stage) =>
+        string.Equals(stage.Condition?.Trim(), "failed()", StringComparison.OrdinalIgnoreCase)
+        && stage.Steps.Any(step => string.Equals(step.Type, "bluegreen-rollback", StringComparison.OrdinalIgnoreCase));
 
     public async Task<bool> ResumeAfterApprovalAsync(
         int runId, IPipelineRunScheduler scheduler, IPipelineChildRunLauncher launcher, CancellationToken ct)

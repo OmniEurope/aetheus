@@ -57,6 +57,14 @@ public interface IUserNotificationService
         string eventType, int serverId, Func<int, object> payloadForProject, CancellationToken ct = default);
 
     /// <summary>
+    /// Audit R2-023 follow-up: writes one delivery per active administrator, whatever their project
+    /// subscriptions and preferences, for an event that concerns the platform rather than a project (a
+    /// server attached to no project has no subscriber to tell). Returns the number of rows written.
+    /// </summary>
+    Task<int> RecordAdministratorEventAsync(
+        string eventType, string subject, string jsonPayload, CancellationToken ct = default);
+
+    /// <summary>
     /// Writes one delivery per subscriber of the event's project whose preferences accept it and who can
     /// still read the project. Returns the number of rows written; zero when the payload names no project.
     /// No transport exists for these deliveries, so they are recorded as NotConfigured and never Sent.

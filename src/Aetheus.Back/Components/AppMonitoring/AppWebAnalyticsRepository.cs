@@ -120,6 +120,17 @@ public sealed class AppWebAnalyticsRepository(AppDbContext db) : IAppWebAnalytic
 
         foreach (var analyticsEvent in ordered)
             RecordLoadedEvent(appId, analyticsEvent, sessionTimeoutMinutes, receivedAtUtc, returningPseudonyms);
+        // Audit R2-007 follow-up: the accepted volume, saved with the events, is what the rolling-hour
+        // cap reads (heartbeats included: they are accepted events even though no event row keeps them).
+        if (ordered.Count > 0)
+        {
+            db.AppAnalyticsIngestVolumes.Add(new AppAnalyticsIngestVolume
+            {
+                MonitoredAppId = appId,
+                ReceivedAtUtc = receivedAtUtc,
+                Count = ordered.Count
+            });
+        }
         return (ordered.Count, duplicateCount + existingIds.Count);
     }
 
@@ -363,6 +374,9 @@ public sealed class AppWebAnalyticsRepository(AppDbContext db) : IAppWebAnalytic
 
     public Task<IReadOnlyList<WebAnalyticsStorageBudget>> GetStorageBudgetsAsync(CancellationToken ct = default) =>
         _storage.GetStorageBudgetsAsync(ct);
+
+    public Task<int> CountAcceptedSinceAsync(int appId, DateTime sinceUtc, CancellationToken ct = default) =>
+        _storage.CountAcceptedSinceAsync(appId, sinceUtc, ct);
 
     public async Task<HashSet<string>> GetRouteNamesAsync(int appId, CancellationToken ct = default)
     {

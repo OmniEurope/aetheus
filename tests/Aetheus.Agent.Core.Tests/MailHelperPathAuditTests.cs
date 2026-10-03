@@ -50,6 +50,30 @@ public sealed class MailHelperPathAuditTests
         Assert.Matches(new Regex(@"NOPASSWD:\s*AETHEUS_MAIL\b.*\bAETHEUS_MAIL_MANAGE\b"), script);
     }
 
+    [Fact]
+    public void Setup_gives_postfix_a_main_cf_before_the_first_postconf()
+    {
+        // Task 23162 (2026-10-03): a Postfix installed as "No configuration" has no main.cf, and the
+        // first postconf -e died on it. The helper preseeds debconf and falls back to the packaged default.
+        var script = LinuxHostConfigTemplates.Read("mail/mail-setup");
+        var firstPostconf = script.IndexOf("postconf -e", StringComparison.Ordinal);
+        Assert.True(script.IndexOf("postfix postfix/main_mailer_type select Internet Site", StringComparison.Ordinal) is > 0 and var preseed
+            && preseed < script.IndexOf("apt-get install", StringComparison.Ordinal));
+        Assert.True(script.IndexOf("/usr/share/postfix/main.cf.debian /etc/postfix/main.cf", StringComparison.Ordinal) is > 0 and var seed
+            && seed < firstPostconf);
+        // IPv4 only (2026-10-03): one reverse DNS record, the IPv4 one, is all the host needs.
+        Assert.Contains("postconf -e \"inet_protocols = ipv4\"", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Setup_unmasks_the_stack_before_enabling_it()
+    {
+        // Tasks 23257 and 23258 (2026-10-03): a postfix unit masked on the host refused enable.
+        var script = LinuxHostConfigTemplates.Read("mail/mail-setup");
+        var unmask = script.IndexOf("systemctl unmask postfix dovecot opendkim", StringComparison.Ordinal);
+        Assert.True(unmask > 0 && unmask < script.IndexOf("systemctl enable postfix dovecot opendkim", StringComparison.Ordinal));
+    }
+
     // Resolve a `$AETHEUS_HELPER_DIR/...`-shaped helper path var against the script's AETHEUS_HELPER_DIR.
     private static string ResolveHelperPath(string varName)
     {

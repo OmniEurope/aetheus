@@ -284,7 +284,9 @@ public class DependencyCycleAuditTests
     {
         var files = RepositoryScan.Enumerate(
             Path.Combine(RepositoryScan.Root, "src", "Aetheus.Back", "Components"), "*.cs");
-        RepositoryScan.AssertScanned(files.Count, 300, "Components source files");
+        Assert.True(files.Count >= 300,
+            $"The Components source files scan is unexpectedly small ({files.Count} < 300); a guard that "
+            + "scans nothing passes vacuously.");
 
         var violations = new SortedSet<string>(StringComparer.Ordinal);
         foreach (var path in files)

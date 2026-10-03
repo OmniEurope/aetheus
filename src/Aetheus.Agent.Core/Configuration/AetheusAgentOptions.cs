@@ -64,13 +64,13 @@ public sealed class AetheusAgentOptions
         // Index refresh / upgrade of already-installed packages - these never pull an arbitrary new
         // package, so they stay general.
         @"^apt(-get)?\s+(update|upgrade)(\s|$)",
-        // Install/remove is restricted to the managed-service catalogue (defence-in-depth: the backend
-        // already validates the service name against WellKnownManageableServices - this is the agent-
-        // side guardrail so a task can NOT apt-install an arbitrary package). Matches exactly what
-        // ServerService.InstallServiceAsync/UninstallServiceAsync emit. KEEP THIS LIST IN LOCKSTEP with
-        // WellKnownManageableServices in src/Aetheus.Back/Components/Servers/ServerService.cs.
+        // Shell install is restricted to the managed-service catalogue (defence-in-depth: the agent-side
+        // guardrail so a shell task can NOT apt-install an arbitrary package). KEEP THIS LIST IN LOCKSTEP
+        // with WellKnownManageableServices in src/Aetheus.Back/Components/Shared/ServerDataMapper.cs.
+        // No shell uninstall is allow-listed: install/uninstall from the UI run as the typed
+        // ServiceInstall/ServiceUninstall operations (`sudo -n apt-get install|purge`, PackageOperationExecutor),
+        // and nothing emits a shell `apt-get remove` any more (recette R2-031).
         @"^apt-get\s+install\s+-y\s+(nginx|apache2|docker|fail2ban|rkhunter|ufw|portsentry|postfix|dovecot|mysql|mariadb|postgresql|redis-server|mongod)$",
-        @"^apt-get\s+remove\s+-y\s+(nginx|apache2|docker|fail2ban|rkhunter|ufw|portsentry|postfix|dovecot|mysql|mariadb|postgresql|redis-server|mongod)$",
         @"^yum\s+(install|update)\s",
         @"^rkhunter\s+--check\s+--skip-keypress\s+--nocolors$",
         @"^rkhunter\s+--update\s+--nocolors$",

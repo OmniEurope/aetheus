@@ -43,7 +43,7 @@ public partial class ServerCertbotSection : ServerActionSectionBase
     };
 
     private string RenewalCheckText => Certbot is { RenewalCheckedAt: { } checkedAt, RenewalCheckSucceeded: { } succeeded }
-        ? string.Format(L[succeeded ? "CertbotRenewalCheckPassed" : "CertbotRenewalCheckFailed"], checkedAt.ToString("yyyy-MM-dd HH:mm"))
+        ? string.Format(L[succeeded ? "CertbotRenewalCheckPassed" : "CertbotRenewalCheckFailed"], checkedAt.ToString("g"))
         : L["CertbotRenewalCheckNever"];
 
     private static OmniTone ConventionStyle(CertbotCertificateDto cert) => cert.RenewalConvention switch

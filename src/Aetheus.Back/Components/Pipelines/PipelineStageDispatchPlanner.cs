@@ -47,8 +47,11 @@ public sealed class PipelineStageDispatchPlanner(
     IHubContext<PipelineHub> pipelineHub,
     IDomainEventDispatcher domainEvents,
     TimeProvider timeProvider,
-    ILogger<PipelineStageDispatchPlanner> logger) : IPipelineStageDispatchPlanner
+    ILogger<PipelineStageDispatchPlanner> logger,
+    IPipelineResourceLockRepository? resourceLocks = null) : IPipelineStageDispatchPlanner
 {
+    private readonly PipelineEnvironmentLockGate? _environmentLocks =
+        resourceLocks is null ? null : new PipelineEnvironmentLockGate(repo, resourceLocks);
     private readonly PipelineReadyStageServerSelector _serverSelector = new(repo, dispatchServers, logger);
     private readonly PipelineStageApprovalGate _approvals = new(repo, pipelineHub, domainEvents, timeProvider);
     private readonly PipelineDeploymentGradeGate _gradeGate = new(repo);
@@ -84,7 +87,10 @@ public sealed class PipelineStageDispatchPlanner(
         var completedStages = await repo.GetCompletedStageNamesAsync(runId, ct).ConfigureAwait(false);
         var terminalStages = await repo.GetTerminalStageNamesAsync(runId, ct).ConfigureAwait(false);
 
-        var previousStageFailed = await repo.HasAnyFailedStepInRunAsync(runId, ct).ConfigureAwait(false);
+        // A cancelled run counts as failed for the deployment rollback its cancellation kept
+        // (PipelineRunControlService): the only failed() stages still pending after a cancel are those.
+        var previousStageFailed = await repo.HasAnyFailedStepInRunAsync(runId, ct).ConfigureAwait(false)
+            || await finalizer.IsCancellationRequestedAsync(runId, ct).ConfigureAwait(false);
         var dependencyTerminalStages = previousStageFailed
             ? terminalStages
             : completedStages;
@@ -221,6 +227,14 @@ public sealed class PipelineStageDispatchPlanner(
             state.AnyEnvironmentCheckFailed = true;
             return ReadyStagePreparation.Skip;
         }
+        if (_environmentLocks is not null
+            && await _environmentLocks.TryHoldAsync(runId, stageDef, flattenedStages, ct).ConfigureAwait(false) is { } lockWait)
+        {
+            // Another run acts on the environment: this one waits, it does not fail (2026-10-02).
+            state.AnyResourceLocked = true;
+            state.AddWaiting(lockWait);
+            return ReadyStagePreparation.Skip;
+        }
         return ReadyStagePreparation.Prepared(stageDef);
     }
 
@@ -288,6 +302,7 @@ public sealed class PipelineStageDispatchPlanner(
         public bool AnyStageCancelled { get; set; }
         public bool AnyStageSyncFailed { get; set; }
         public bool AnyThrottled { get; set; }
+        public bool AnyResourceLocked { get; set; }
         public bool AnyRunnerTemporarilyUnavailable { get; set; }
         public bool AnyEnvironmentCheckFailed { get; set; }
         public bool SystemTaskDispatchFailed { get; set; }
@@ -464,7 +479,7 @@ public sealed class PipelineStageDispatchPlanner(
         }
         if (state.AnyStageCancelled)
             return true;
-        if ((state.AnyThrottled || state.AnyRunnerTemporarilyUnavailable)
+        if ((state.AnyThrottled || state.AnyRunnerTemporarilyUnavailable || state.AnyResourceLocked)
             && state.UnmatchedReasons.Count == 0
             && !state.AnyEnvironmentCheckFailed)
         {

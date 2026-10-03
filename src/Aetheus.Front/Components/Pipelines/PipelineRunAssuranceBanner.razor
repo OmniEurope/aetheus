@@ -19,7 +19,8 @@ else if (Verdict is { Deployable: true })
     <OmniAlert Severity="OmniSeverity.Success" Title="@L["CandidateDeployableTitle"]" Class="omni-u-mt-sm">
         @if (Verdict.Grade is { Length: > 0 } grade)
         {
-            <span>@L["AssuranceGrade"]: <strong>@grade</strong></span>
+            @* Recette R2-050: the grade drawn as everywhere else, its colour included. *@
+            <span>@L["AssuranceGrade"]: @if (Enum.TryParse<AnalysisGrade>(grade, ignoreCase: true, out var letter)) { <GradeBadge Value="@letter" /> } else { <strong>@grade</strong> }</span>
         }
     </OmniAlert>
 }

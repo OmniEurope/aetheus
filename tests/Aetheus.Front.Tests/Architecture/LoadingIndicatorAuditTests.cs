@@ -17,13 +17,17 @@ public sealed class LoadingIndicatorAuditTests
         {
             // Recette R-333: the page-load bar under the top bar is the one indeterminate OE bar the user
             // asked for; every wait inside a page still renders AetheusLoader.
-            // Recette R2-030 (2026-10-01): the user asked for a bar on a service row while its operation
-            // runs; it is a linear bar, so nothing spins and decision D11 holds.
-            if (Path.GetFileName(file) is "PageLoadProgressBar.razor" or "ManageableServiceGrid.razor") continue;
+            if (Path.GetFileName(file) == "PageLoadProgressBar.razor") continue;
             var source = File.ReadAllText(file);
             foreach (Match match in Regex.Matches(source, @"<OmniProgressBar\b(?:(?:""[^""]*"")|[^>])*?/>", RegexOptions.CultureInvariant))
             {
                 if (match.Value.Contains("Value=", StringComparison.Ordinal)) continue;
+                // Recette R2-030 (2026-10-01): the user asked for a bar on a service row while its
+                // operation runs. Only that one shape is allowed, a labelled linear bar (nothing spins,
+                // decision D11 holds); any other valueless bar in the file is still refused.
+                if (Path.GetFileName(file) == "ManageableServiceGrid.razor"
+                    && match.Value.Contains("Shape=\"OmniProgressShape.Linear\"", StringComparison.Ordinal)
+                    && match.Value.Contains("Label=", StringComparison.Ordinal)) continue;
                 var line = source.AsSpan(0, match.Index).Count('\n') + 1;
                 violations.Add($"{Path.GetRelativePath(frontDir, file)}:{line}");
             }
@@ -47,8 +51,10 @@ public sealed class LoadingIndicatorAuditTests
         var loader = File.ReadAllText(loaderFile);
 
         Assert.Matches(@"<OmniLogoLoader\b", loader);
-        Assert.Contains("src=\"aetheus-icon.svg\"", loader, StringComparison.Ordinal);
-        Assert.DoesNotContain("<svg", loader, StringComparison.OrdinalIgnoreCase);
+        // R2-075 (OE 1.5.0): the splash's animated plane, played as it is, its motion in CSS keyframes only.
+        Assert.Matches(@"<OmniLogoLoader\b[^>]*\bAnimatedMark=""true""", loader);
+        Assert.Contains("class=\"p-ship\"", loader, StringComparison.Ordinal);
+        Assert.DoesNotMatch(@"<(animate|animateTransform|animateMotion|set)\b", loader);
 
         var direct = RepositoryScan.Enumerate(frontDir, "*.razor")
             .Where(file => !string.Equals(file, loaderFile, StringComparison.OrdinalIgnoreCase))

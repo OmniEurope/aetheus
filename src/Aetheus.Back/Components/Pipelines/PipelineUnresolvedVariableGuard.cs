@@ -136,6 +136,19 @@ internal static partial class PipelineUnresolvedVariableGuard
         return failures;
     }
 
+    /// <summary>True when <paramref name="value"/> still references a name absent from
+    /// <paramref name="resolved"/>: a value a launch-time resolution left for the run to complete (a
+    /// stage output, a control-plane variable), so it has no value yet.</summary>
+    internal static bool ReferencesAnUnresolvedName(string? value, IReadOnlyDictionary<string, string> resolved)
+    {
+        ArgumentNullException.ThrowIfNull(resolved);
+        if (string.IsNullOrEmpty(value) || !value.Contains("$(", StringComparison.Ordinal)) return false;
+        foreach (Match match in VariableReference().Matches(value))
+            if (!match.Groups[2].Success && !resolved.ContainsKey(match.Groups[1].Value))
+                return true;
+        return false;
+    }
+
     private static void Collect(
         string? text,
         string origin,

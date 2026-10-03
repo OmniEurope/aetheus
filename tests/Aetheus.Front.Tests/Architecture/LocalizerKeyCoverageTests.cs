@@ -28,8 +28,8 @@ public class LocalizerKeyCoverageTests
         var english = ResourceKeys("AppStrings.resx");
         var french = ResourceKeys("AppStrings.fr-FR.resx");
 
-        var missing = RepositoryScan.Enumerate(FrontRoot, "*.razor", SearchOption.AllDirectories)
-            .Concat(RepositoryScan.Enumerate(FrontRoot, "*.cs", SearchOption.AllDirectories))
+        var missing = RepositoryScan.Enumerate(FrontRoot, "*.razor")
+            .Concat(RepositoryScan.Enumerate(FrontRoot, "*.cs"))
             .Where(path => !path.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
                 && !path.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
             .SelectMany(path => LocalizerRead.Matches(File.ReadAllText(path))

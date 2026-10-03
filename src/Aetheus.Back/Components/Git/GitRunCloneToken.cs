@@ -63,8 +63,25 @@ internal static class GitRunCloneToken
             return null;
         }
 
-        var expected = Compute(config, runId, projectId, expiryUnix);
-        return CryptographicOperations.FixedTimeEquals(presented, expected) ? runId : null;
+        // Recette R-464: a token is accepted under either configured secret. While a blue-green switch
+        // moves from the Auth:EncryptionKey fallback to a dedicated RunTokenKey, the two colours sign
+        // with different secrets; each must still accept what the other minted. Both are server
+        // secrets, so this widens nothing an outsider can forge.
+        foreach (var secret in ValidationSecrets(config))
+        {
+            if (CryptographicOperations.FixedTimeEquals(presented, Compute(secret, runId, projectId, expiryUnix)))
+                return runId;
+        }
+        return null;
+    }
+
+    private static IEnumerable<string> ValidationSecrets(IConfiguration config)
+    {
+        var dedicated = config["GitLight:RunTokenKey"];
+        var fallback = config["Auth:EncryptionKey"];
+        if (!string.IsNullOrEmpty(dedicated)) yield return dedicated;
+        if (!string.IsNullOrEmpty(fallback) && !string.Equals(fallback, dedicated, StringComparison.Ordinal))
+            yield return fallback;
     }
 
     private static byte[] Compute(IConfiguration config, int runId, int projectId, long expiryUnix)
@@ -79,6 +96,11 @@ internal static class GitRunCloneToken
         if (string.IsNullOrEmpty(secret))
             throw new InvalidOperationException(
                 "No signing key configured for git run clone tokens (set GitLight:RunTokenKey or Auth:EncryptionKey).");
+        return Compute(secret, runId, projectId, expiryUnix);
+    }
+
+    private static byte[] Compute(string secret, int runId, int projectId, long expiryUnix)
+    {
         var key = HKDF.DeriveKey(
             HashAlgorithmName.SHA256,
             Encoding.UTF8.GetBytes(secret),

@@ -82,6 +82,7 @@ public sealed class CoordinatorLeaderLeaseTests
         var service = new ArtifactStorageMonitorService(
             new ConfigurationBuilder().Build(),
             Substitute.For<IHubContext<AlertHub>>(),
+            Substitute.For<IServiceScopeFactory>(),
             TimeProvider.System,
             NullLogger<ArtifactStorageMonitorService>.Instance,
             lease);

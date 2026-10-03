@@ -39,12 +39,13 @@ public sealed class SiteAppearanceWindowTests : BunitContext
         await cut.InvokeAsync(cut.Instance.OpenAsync);
 
         var window = cut.Find(".omni-appearance-window");
-        // OE 1.3.0: one block of rows in reading order, theme, palette, text size, control size, density.
+        // OE 1.5.0: one block of rows in reading order, theme, palette, density, text size, control size
+        // (the font row only when the site binds FontChanged, which Aetheus does not).
         var rows = window.QuerySelectorAll(".omni-appearance-settings--window .omni-appearance-settings__row");
         Assert.Equal(5, rows.Length);
-        Assert.Contains("7/10", rows[2].TextContent, StringComparison.Ordinal);
-        Assert.Contains("3/10", rows[3].TextContent, StringComparison.Ordinal);
-        var densities = rows[4].QuerySelectorAll(".omni-select-bar__item");
+        Assert.Contains("7/10", rows[3].TextContent, StringComparison.Ordinal);
+        Assert.Contains("3/10", rows[4].TextContent, StringComparison.Ordinal);
+        var densities = rows[2].QuerySelectorAll(".omni-select-bar__item");
         Assert.Equal(3, densities.Length);
         Assert.Contains("omni-select-bar__item--selected", densities[0].ClassList);
     }

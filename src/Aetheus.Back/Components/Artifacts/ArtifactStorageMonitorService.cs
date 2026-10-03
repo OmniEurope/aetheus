@@ -8,11 +8,14 @@ namespace Aetheus.Back.Components.Artifacts;
 /// <summary>
 /// Measures the physical artifact volume, not only database metadata, and raises a throttled alert
 /// when its configured budget is exceeded or when its growth, measured over at least 24 hours, would
-/// reach that budget soon. It never deletes data.
+/// reach that budget soon. It never deletes data. Audit R2-016 follow-up: the growth history is kept in
+/// the database (<see cref="IArtifactStorageMeasurementRepository"/>) and reloaded each time this
+/// backend becomes the leader, so a deploy or a leader change no longer restarts the 24-hour wait.
 /// </summary>
 public sealed class ArtifactStorageMonitorService(
     IConfiguration configuration,
     IHubContext<AlertHub> alertHub,
+    IServiceScopeFactory scopeFactory,
     TimeProvider timeProvider,
     ILogger<ArtifactStorageMonitorService> logger,
     IPostgresLeaderLease? leaderLease = null) : BackgroundService
@@ -30,6 +33,7 @@ public sealed class ArtifactStorageMonitorService(
     internal static readonly TimeSpan BudgetHorizon = TimeSpan.FromDays(7);
 
     private readonly List<(DateTime At, long Bytes)> _history = [];
+    private bool _historyLoaded;
     private DateTime? _lastAlertAt;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -42,6 +46,8 @@ public sealed class ArtifactStorageMonitorService(
 
     private async Task RunLeaderLoopAsync(CancellationToken stoppingToken)
     {
+        // A new leadership reloads the persisted history: the other colour may have measured meanwhile.
+        _historyLoaded = false;
         do
         {
             try
@@ -64,6 +70,15 @@ public sealed class ArtifactStorageMonitorService(
 
     internal async Task EvaluateAsync(CancellationToken ct)
     {
+        await using var scope = scopeFactory.CreateAsyncScope();
+        var measurements = scope.ServiceProvider.GetRequiredService<IArtifactStorageMeasurementRepository>();
+        if (!_historyLoaded)
+        {
+            _history.Clear();
+            _history.AddRange(await measurements.GetAsync(ct).ConfigureAwait(false));
+            _historyLoaded = true;
+        }
+
         var basePath = Path.GetFullPath(configuration["ArtifactStorage:BasePath"] ?? "./data/artifacts");
         var currentBytes = MeasureDirectoryBytes(basePath);
         var now = timeProvider.GetUtcNow().UtcDateTime;
@@ -101,6 +116,7 @@ public sealed class ArtifactStorageMonitorService(
         }
 
         Record(_history, now, currentBytes);
+        await measurements.RecordAsync(now, currentBytes, now - GrowthWindow, ct).ConfigureAwait(false);
     }
 
     /// <summary>

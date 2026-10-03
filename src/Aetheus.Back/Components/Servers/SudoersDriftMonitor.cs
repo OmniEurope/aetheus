@@ -2,8 +2,10 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Aetheus.Back.Components.Servers.Events;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Hubs;
+using Aetheus.Back.Services.DomainEvents;
 using Microsoft.AspNetCore.SignalR;
 
 namespace Aetheus.Back.Components.Servers;
@@ -13,13 +15,19 @@ namespace Aetheus.Back.Components.Servers;
 /// Sec-Audit alert when a drop-in changed out-of-band. Recette R2-023: an agent update re-renders the
 /// drop-ins from the installer templates, so the heartbeat that confirms the update re-captures the
 /// baseline; a drifted state is alerted once (its fingerprint is persisted on the server), not on every
-/// heartbeat, and a different drifted state alerts again.
+/// heartbeat, and a different drifted state alerts again. Audit follow-up: the alert is also dispatched as
+/// <see cref="SudoersDriftDetectedEvent"/>, whose handlers persist it (audit trail, administrators'
+/// notifications), and raised again every <see cref="ReminderInterval"/> while the same drift lasts.
 /// </summary>
 internal sealed class SudoersDriftMonitor(
     IHubContext<AlertHub> alertHub,
     TimeProvider timeProvider,
+    IDomainEventDispatcher? domainEvents,
     ILogger logger)
 {
+    /// <summary>How often a drift that lasts is alerted again; within it the fingerprint deduplicates.</summary>
+    internal static readonly TimeSpan ReminderInterval = TimeSpan.FromHours(6);
+
     /// <param name="confirmedAgentVersion">The agent version this same heartbeat confirmed as an
     /// update target, or null when the heartbeat confirmed no update.</param>
     /// <returns>Whether the server's baseline or alerted fingerprint changed and must be saved.</returns>
@@ -53,14 +61,26 @@ internal sealed class SudoersDriftMonitor(
         }
 
         var fingerprint = Fingerprint(drifted);
-        if (string.Equals(server.SudoersDriftAlertedFingerprint, fingerprint, StringComparison.Ordinal))
+        var now = timeProvider.GetUtcNow().UtcDateTime;
+        var isReminder = string.Equals(server.SudoersDriftAlertedFingerprint, fingerprint, StringComparison.Ordinal);
+        // A fingerprint alerted before the alert date existed (null) is due: it is re-raised once now.
+        if (isReminder && server.SudoersDriftAlertedAt is { } alertedAt && now - alertedAt < ReminderInterval)
             return false;
         server.SudoersDriftAlertedFingerprint = fingerprint;
+        server.SudoersDriftAlertedAt = now;
 
-        var files = string.Join(", ", drifted.Select(kv => kv.Key));
+        await RaiseAsync(server, string.Join(", ", drifted.Select(kv => kv.Key)), isReminder, now, ct)
+            .ConfigureAwait(false);
+        return true;
+    }
+
+    private async Task RaiseAsync(Server server, string files, bool isReminder, DateTime now, CancellationToken ct)
+    {
         logger.LogWarning(
-            "Sudoers drift on server {ServerId} ({ServerName}): {Files} differ from the baseline",
-            server.Id, server.Name, files);
+            "Sudoers drift on server {ServerId} ({ServerName}): {Files} differ from the baseline{Reminder}",
+            server.Id, server.Name, files, isReminder ? " (still present, reminder)" : string.Empty);
+        var message = $"Sudoers drop-in changed out-of-band: {files}. "
+                      + "Verify the change was authorized; the install baseline no longer matches.";
         await alertHub.Clients.Group(HubGroups.Alerts).SendAsync("AlertTriggered", new AlertTriggeredDto
         {
             RuleName = "Sec-Audit",
@@ -68,11 +88,17 @@ internal sealed class SudoersDriftMonitor(
             ServerName = server.Name,
             Metric = "SudoersDrift",
             Severity = "Critical",
-            Message = $"Sudoers drop-in changed out-of-band: {files}. "
-                      + "Verify the change was authorized; the install baseline no longer matches.",
-            TriggeredAt = timeProvider.GetUtcNow().UtcDateTime
+            Message = message,
+            TriggeredAt = now
         }, ct).ConfigureAwait(false);
-        return true;
+        // Awaited, observer semantics: a handler failure is logged by the dispatcher and the heartbeat
+        // goes on; the next reminder raises it again.
+        if (domainEvents is not null)
+        {
+            await domainEvents.DispatchAsync(
+                new SudoersDriftDetectedEvent(server.Id, server.Name, files, message, isReminder, now), ct)
+                .ConfigureAwait(false);
+        }
     }
 
     private bool RecaptureAfterAgentUpdate(
@@ -101,6 +127,7 @@ internal sealed class SudoersDriftMonitor(
             return false;
         server.SudoersBaseline = baseline;
         server.SudoersDriftAlertedFingerprint = fingerprint;
+        server.SudoersDriftAlertedAt = null;
         return true;
     }
 

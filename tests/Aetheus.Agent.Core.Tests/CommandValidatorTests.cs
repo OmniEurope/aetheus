@@ -85,7 +85,7 @@ public class CommandValidatorTests
         Assert.True(validator.IsAllowed(command));
     }
 
-    // Service install/remove is allow-listed ONLY for the managed-service catalogue (mirrors
+    // Shell service install is allow-listed ONLY for the managed-service catalogue (mirrors
     // WellKnownManageableServices); index refresh/upgrade stay general. This is the agent-side
     // guardrail on top of the backend's ServiceName validation.
     [Theory]
@@ -93,7 +93,6 @@ public class CommandValidatorTests
     [InlineData("apt-get install -y nginx")]
     [InlineData("apt-get install -y postgresql")]
     [InlineData("apt-get install -y redis-server")]
-    [InlineData("apt-get remove -y postfix")]
     [InlineData("apt-get update")]
     [InlineData("apt-get upgrade -y")]
     [InlineData("apt update")]
@@ -111,6 +110,7 @@ public class CommandValidatorTests
     [InlineData("apt-get install -y wget malware")]    // arbitrary / multiple packages
     [InlineData("apt install apache2")]                // only apt-get install is allow-listed
     [InlineData("apt-get remove -y openssh-server")]   // not a managed service
+    [InlineData("apt-get remove -y postfix")]          // uninstall is the typed purge operation, never a shell task (R2-031)
     [InlineData("apt-get install -y apache2 nginx")]   // single service per command only
     public void IsAllowed_RejectsNonServiceAptInstall(string command)
     {

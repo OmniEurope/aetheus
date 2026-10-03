@@ -102,7 +102,7 @@ public static class SarifAnalysisParser
         var severity = ReadSeverity(result, rule);
         var confidence = ReadConfidence(result);
         var title = Truncate(rule?.Title ?? message, 500);
-        var suppliedFingerprint = ReadSuppliedFingerprint(result);
+        var suppliedFingerprint = ReadSuppliedFingerprint(result, rawMessage);
         var fingerprint = ComputeHash(string.Join('|',
             "v2",
             ((int)category).ToString(CultureInfo.InvariantCulture),
@@ -297,15 +297,29 @@ public static class SarifAnalysisParser
             : null;
     }
 
-    private static string? ReadSuppliedFingerprint(JsonElement result)
+    /// <summary>Recette R2-055: provenance a history scanner attaches to a result (gitleaks `git` mode
+    /// fills author, email, date and commit message). They say who and when, not which finding: read
+    /// first in key order, `author` merged every leak of one author into a single finding, so a vendored
+    /// Monaco line and a real token in another file shared one identity.</summary>
+    private static readonly HashSet<string> ProvenanceFingerprintKeys =
+        new(StringComparer.OrdinalIgnoreCase) { "author", "email", "date", "commitMessage" };
+
+    private static string? ReadSuppliedFingerprint(JsonElement result, string rawMessage)
     {
         if (!result.TryGetProperty("partialFingerprints", out var fingerprints)
             || fingerprints.ValueKind != JsonValueKind.Object) return null;
         foreach (var property in fingerprints.EnumerateObject().OrderBy(item => item.Name, StringComparer.Ordinal))
         {
-            if (property.Value.ValueKind == JsonValueKind.String
-                && !string.IsNullOrWhiteSpace(property.Value.GetString()))
-                return $"{property.Name.ToLowerInvariant()}:{property.Value.GetString()!.Trim().ToLowerInvariant()}";
+            if (ProvenanceFingerprintKeys.Contains(property.Name)
+                || property.Value.ValueKind != JsonValueKind.String
+                || string.IsNullOrWhiteSpace(property.Value.GetString()))
+                continue;
+            var supplied = $"{property.Name.ToLowerInvariant()}:{property.Value.GetString()!.Trim().ToLowerInvariant()}";
+            // A commit holds several findings: the commit alone is not an identity, the result's own
+            // text (which names the file) completes it.
+            return string.Equals(property.Name, "commitSha", StringComparison.OrdinalIgnoreCase)
+                ? $"{supplied}|{NormalizeIdentityText(rawMessage)}"
+                : supplied;
         }
         return null;
     }

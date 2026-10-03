@@ -685,8 +685,8 @@ public sealed class DeploymentSafetyAuditTests
         Assert.Contains("Pinned Node.js $NODE_VERSION installation could not be verified", nodeBootstrap, StringComparison.Ordinal);
 
         var deploymentFiles = RepositoryScan
-            .Enumerate(Path.Combine(Root, "deploy", "pipelines"), "*.yaml", SearchOption.TopDirectoryOnly)
-            .Concat(RepositoryScan.Enumerate(Path.Combine(Root, "deploy", "docker"), "Dockerfile*", SearchOption.TopDirectoryOnly));
+            .EnumerateTopLevel(Path.Combine(Root, "deploy", "pipelines"), "*.yaml")
+            .Concat(RepositoryScan.EnumerateTopLevel(Path.Combine(Root, "deploy", "docker"), "Dockerfile*"));
         foreach (var path in deploymentFiles)
         {
             var content = File.ReadAllText(path);

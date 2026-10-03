@@ -2,6 +2,7 @@
 using Aetheus.Back.Components.Notifications;
 using Aetheus.Back.Data.Entities;
 using Aetheus.Back.Hubs;
+using Aetheus.Back.Services;
 using Microsoft.AspNetCore.SignalR;
 
 namespace Aetheus.Back.Components.Alerts;
@@ -10,12 +11,19 @@ public sealed class AlertEvaluatorService(
     IServiceScopeFactory scopeFactory,
     IHubContext<AlertHub> alertHub,
     ILogger<AlertEvaluatorService> logger,
-    TimeProvider timeProvider) : BackgroundService
+    TimeProvider timeProvider,
+    IPostgresLeaderLease? leaderLease = null) : BackgroundService
 {
     private static readonly TimeSpan MaximumMetricGap = TimeSpan.FromSeconds(90);
     private static readonly TimeSpan CheckInterval = TimeSpan.FromSeconds(30);
 
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    // Only the live colour runs it (decision of 2026-10-02, PostgresLeaderLease).
+    protected override Task ExecuteAsync(CancellationToken stoppingToken) =>
+        leaderLease is null
+            ? RunLeaderLoopAsync(stoppingToken)
+            : leaderLease.RunAsLeaderAsync("aetheus:alert-evaluator", RunLeaderLoopAsync, stoppingToken);
+
+    private async Task RunLeaderLoopAsync(CancellationToken stoppingToken)
     {
         using var timer = new PeriodicTimer(CheckInterval);
         // do..while: evaluate immediately on startup, then every interval

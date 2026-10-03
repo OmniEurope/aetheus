@@ -35,5 +35,12 @@ public partial class PipelineRunApprovalPanel : IDisposable
 
     private void Reload() => Navigation.NavigateTo(Navigation.Uri, forceLoad: true);
 
+    private bool _commentRequested;
+
+    /// <summary>Recette R2-046: the field shows once asked for, and stays while it holds a comment.</summary>
+    private bool CommentOpen => _commentRequested || !string.IsNullOrEmpty(Approval?.Comments);
+
+    private void OpenComment() => _commentRequested = true;
+
     public void Dispose() => VersionState.Changed -= VersionChanged;
 }

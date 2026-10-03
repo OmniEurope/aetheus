@@ -30,6 +30,7 @@ internal sealed class BlueGreenJournal(BlueGreenContext context)
     private string PreviousPath => Path.Combine(context.JournalDir, "previous-live");
     private string IdlePath => Path.Combine(context.JournalDir, "idle");
     private string RevisionPath => Path.Combine(context.JournalDir, "revision");
+    private string OwnerRunPath => Path.Combine(context.JournalDir, "owner-run");
 
     internal bool Exists => Directory.Exists(context.JournalDir);
 
@@ -37,6 +38,9 @@ internal sealed class BlueGreenJournal(BlueGreenContext context)
     internal string? PreviousLive => ReadOrNull(PreviousPath);
     internal string? Idle => ReadOrNull(IdlePath);
     internal string? Revision => ReadOrNull(RevisionPath);
+
+    /// <summary>The pipeline run that opened the transaction; null for one opened before owners were recorded.</summary>
+    internal string? OwnerRun => ReadOrNull(OwnerRunPath);
 
     /// <summary>Reads the colour currently serving traffic, or null when none has been recorded yet.</summary>
     internal string? ReadLiveColour()
@@ -53,7 +57,10 @@ internal sealed class BlueGreenJournal(BlueGreenContext context)
     /// Opens a transaction. Refuses to overwrite an unfinished one: a second deployment that
     /// silently replaced a live journal would destroy the only record of how to get back.
     /// </summary>
-    internal bool TryOpen(string previousLive, string idle, string revision, out string error)
+    internal bool TryOpen(string previousLive, string idle, string revision, out string error) =>
+        TryOpen(previousLive, idle, revision, ownerRun: null, out error);
+
+    internal bool TryOpen(string previousLive, string idle, string revision, string? ownerRun, out string error)
     {
         error = string.Empty;
         // A directory with no `state` file at all is not a transaction. TryOpen writes `state` last,
@@ -76,6 +83,7 @@ internal sealed class BlueGreenJournal(BlueGreenContext context)
         WriteAtomic(PreviousPath, previousLive);
         WriteAtomic(IdlePath, idle);
         WriteAtomic(RevisionPath, revision);
+        if (!string.IsNullOrWhiteSpace(ownerRun)) WriteAtomic(OwnerRunPath, ownerRun.Trim());
         WriteAtomic(StatePath, Prepared);
         return true;
     }

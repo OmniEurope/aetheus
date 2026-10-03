@@ -75,13 +75,14 @@ public class ServerServicesSectionRenderTests : BunitContext
     // ── GetStatusBadgeStyle ──────────────────────────────────────────────────
 
     [Theory]
-    [InlineData("active", true, OmniTone.Success)]
-    [InlineData("scheduled", false, OmniTone.Accent)]
+    // Recette R2-058 (2026-10-02, the user's exception over R-507): running is blue, stopped red,
+    // scheduled moves to Info so it does not read as running.
+    [InlineData("active", true, OmniTone.Accent)]
+    [InlineData("scheduled", false, OmniTone.Info)]
     [InlineData("idle", false, OmniTone.Neutral)]
-    // Recette R-507: stopped is not a fault. Only a failure is red.
-    [InlineData("dead", false, OmniTone.Neutral)]
-    [InlineData("installed", false, OmniTone.Neutral)]
-    [InlineData("generated", false, OmniTone.Neutral)]
+    [InlineData("dead", false, OmniTone.Danger)]
+    [InlineData("installed", false, OmniTone.Danger)]
+    [InlineData("generated", false, OmniTone.Danger)]
     [InlineData("masked", false, OmniTone.Neutral)]
     [InlineData("activating", false, OmniTone.Warning)]
     [InlineData("failed", false, OmniTone.Danger)]
@@ -108,9 +109,10 @@ public class ServerServicesSectionRenderTests : BunitContext
     }
 
     [Fact]
-    public void GetStatusBadgeStyle_Running_AlwaysSuccess()
+    public void GetStatusBadgeStyle_Running_AlwaysBlue()
     {
-        Assert.Equal(OmniTone.Success, ManageableServiceGrid.GetStatusBadgeStyle("scheduled", true));
+        // Recette R2-058: a running service reads blue, whatever its unit state says.
+        Assert.Equal(OmniTone.Accent, ManageableServiceGrid.GetStatusBadgeStyle("scheduled", true));
     }
 
     // ── Render with full service data ────────────────────────────────────────

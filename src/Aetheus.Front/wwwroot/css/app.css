@@ -451,55 +451,44 @@
     gap: 0.25rem;
 }
 
-.analysis-finding-grid-summary {
-    display: flex;
-    flex-direction: column;
-    gap: 0.3rem;
+/* Recette R2-053: a findings row is one fixed line (STD-GRID), so the title and the location are one
+   line each, cut with an ellipsis, the whole text on hover. The location is cut at its start: the file
+   name at the end is what tells two findings apart. */
+.analysis-finding-grid-title {
+    display: block;
     min-width: 0;
-    white-space: normal;
-}
-
-.analysis-finding-grid-message {
-    display: -webkit-box;
-    color: var(--omni-color-text-muted);
-    font-size: 0.8125rem;
-    line-height: 1.35;
-    white-space: pre-line;
-    overflow-wrap: anywhere;
     overflow: hidden;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .analysis-finding-location {
-    display: flex;
-    align-items: flex-start;
-    gap: 0.5rem;
+    display: block;
     min-width: 0;
-}
-
-.analysis-finding-location > .omni-icon {
-    flex: 0 0 auto;
-    margin-top: 0.1rem;
-    color: var(--omni-color-accent);
-    font-size: 1rem;
-}
-
-.analysis-finding-location > div {
-    display: flex;
-    flex-direction: column;
-    gap: 0.2rem;
-    min-width: 0;
-}
-
-.analysis-finding-location code {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    direction: rtl;
+    text-align: left;
     color: var(--omni-color-text);
     font-family: var(--omni-font-family-monospace, monospace);
     font-size: 0.8rem;
-    overflow-wrap: anywhere;
 }
 
-.analysis-finding-location span,
+.analysis-finding-location > bdi {
+    direction: ltr;
+    unicode-bidi: isolate;
+}
+
+/* Recette R2-054: the findings export under the table, laid out like OE's grid export bar. */
+.analysis-findings-export {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: var(--omni-space-xs, 0.25rem);
+    padding-top: var(--omni-space-xs, 0.25rem);
+}
+
 .analysis-finding-location-unavailable {
     color: var(--omni-color-text-muted);
     font-size: 0.75rem;
@@ -878,8 +867,8 @@ a, .btn-link {
 
 @keyframes splash-fade-in { from { opacity: 0; transform: scale(0.8); } to { opacity: 1; transform: scale(1); } }
 
-/* Recette R-536: the loading indicator is the package's OmniLogoLoader holding the plane (AetheusLoader); its
-   sizes and its float are OE's. Centered, it takes the width of its container, the mark in the middle. */
+/* Recette R-536, R2-075: the loading indicator is the package's OmniLogoLoader holding the animated plane (AetheusLoader); its
+   sizes are OE's, its motion the plane's keyframes above. Centered, it takes the width of its container, the mark in the middle. */
 .aetheus-loader-centered {
     display: flex;
     width: 100%;
@@ -4276,16 +4265,9 @@ a.pipeline-relation-card:hover {
 }
 
 .run-tl-prev-dur {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.1875rem;
     color: var(--omni-color-text-muted, #777);
     font-size: 0.6875rem;
     white-space: nowrap;
-}
-
-.run-tl-prev-dur .omni-icon {
-    font-size: 0.75rem;
 }
 
 /* What a collapsed trigger row's child is executing right now. */
@@ -4362,6 +4344,8 @@ a.pipeline-relation-card:hover {
    scrollbar. Pinning the minimum to 0 keeps the grid inside its container. */
 .run-overview-tiles > * { min-width: 0; }
 .run-overview-tiles > .run-tile-link { height: 100%; }
+/* Recette R2-048: the lineage tile takes two columns when it names a run (PipelineRunLineageTile.IsWide). */
+.run-overview-tiles > .run-lineage-tile--wide { grid-column: span 2; }
 /* Keyboard focus ring for the tiles that act as buttons (jump-to-tab), matching the hover affordance. */
 .run-tile-link[role="button"]:focus-visible { outline: 2px solid var(--omni-color-accent, #7c4dff); outline-offset: 2px; border-radius: var(--aetheus-radius); }
 .run-overview-card {
@@ -4430,6 +4414,15 @@ a.pipeline-relation-card:hover {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+/* Recette R2-049: an artifact name is long (ApplicationPayload-artifacts) and wrapped over several lines
+   at the value size, growing the whole row of tiles. One line at the sub-row size, full name on hover. */
+.run-tile-main > .run-artifact-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.8125rem;
 }
 /* The Source tile puts its repository and branch sub-rows in the value slot. */
 .run-tile-main-rows {
@@ -7287,13 +7280,24 @@ textarea.omni-text-box,
    popovers. */
 :root { --omni-notification-top: calc(3.3125rem + 0.5rem); }
 
-/* The short catch-up when the page comes back to the foreground: a small notification centred at the
-   bottom, clear of the toasts at the top, under the connection-lost overlay (z-index 130), no veil. */
+/* Recette R2-061: the catch-up when the page comes back to the foreground is a full veil over the page
+   (the plane and "Synchronisation en cours…"), under the connection-lost overlay (z-index 130). It
+   catches every click until the data is current again. */
 .realtime-sync-indicator {
-    position: fixed; inset-block-end: 1rem; inset-inline: 0; z-index: 110;
-    display: flex; justify-content: center; padding-inline: 1rem; pointer-events: none;
+    position: fixed; inset: 0; z-index: 120;
+    display: flex; align-items: center; justify-content: center; padding: 1rem;
+    background: color-mix(in srgb, var(--surface) 82%, transparent);
+    backdrop-filter: blur(2px);
 }
-.realtime-sync-indicator .omni-notification { inline-size: auto; max-inline-size: min(22.5rem, 100%); pointer-events: auto; }
+.realtime-sync-card {
+    display: flex; flex-direction: column; align-items: center; gap: 0.75rem;
+    padding: 1.5rem 2rem; max-inline-size: min(22.5rem, 100%);
+    background: var(--omni-card-background, var(--omni-color-surface));
+    border: 1px solid var(--omni-card-border-color, transparent);
+    border-radius: var(--aetheus-radius);
+    text-align: center;
+}
+.realtime-sync-text { font-weight: 500; }
 
 /* R-112 to R-116: user notifications. The bell reuses the task tracker's button and popover rules
    above; only its footer (mark all read + see all) and the followed-projects list need their own. */
@@ -8621,6 +8625,15 @@ textarea.omni-text-box,
     padding-inline: 0;
     border-radius: var(--aetheus-radius);
     justify-content: center;
+    /* Recette R2-050: centred in its square on both axes, not on a padded line box. */
+    align-items: center;
+    padding-block: 0;
+}
+
+/* Recette R2-050: the "recent runs" cell holds a 22px grade badge in a wrapper the grid caps at the
+   text height (20px): the badge overflowed it and sat lower than the dots. Same release as R-166. */
+.omni-data-grid tr[data-omni-row-index] > td > .pipeline-run-history-cell {
+    max-height: var(--aetheus-badge-height);
 }
 
 /* PLAN-003 lot 19: on a run page the tab rail stays put while the tab content scrolls, so switching
@@ -8747,22 +8760,30 @@ textarea.omni-text-box,
     overflow-anchor: none;
 }
 
-/* Recette R-223: one colour per grade letter, from green (A) to red (F), dark enough for white text
-   (WCAG AA) in both themes. The variant stays for the badge's meaning; only the fill changes. */
+/* Recette R-223, then R2-050 (2026-10-02): one colour per grade letter, the same on every page, on a
+   scale the user chose: A green, B a lighter, yellower green, C yellow turning orange, D orange, E red
+   turning orange, F red. Each letter keeps WCAG AA contrast (R-223): white on the dark fills (A, E, F),
+   a near-black on the light ones (B, C, D), where white would not reach 4.5:1. */
 :root {
-    --aetheus-grade-a: #1b7a34;
-    --aetheus-grade-b: #4d7c0f;
-    --aetheus-grade-c: #8a6d00;
-    --aetheus-grade-d: #b45309;
+    --aetheus-grade-a: #15803d;
+    --aetheus-grade-a-text: #ffffff;
+    --aetheus-grade-b: #84cc16;
+    --aetheus-grade-b-text: #1a2e05;
+    --aetheus-grade-c: #fbbf24;
+    --aetheus-grade-c-text: #1f1300;
+    --aetheus-grade-d: #f97316;
+    --aetheus-grade-d-text: #1c0a00;
     --aetheus-grade-e: #c2410c;
+    --aetheus-grade-e-text: #ffffff;
     --aetheus-grade-f: #b91c1c;
+    --aetheus-grade-f-text: #ffffff;
 }
-.omni-badge.omni-badge--solid.grade-badge--a { background: var(--aetheus-grade-a); color: #fff; }
-.omni-badge.omni-badge--solid.grade-badge--b { background: var(--aetheus-grade-b); color: #fff; }
-.omni-badge.omni-badge--solid.grade-badge--c { background: var(--aetheus-grade-c); color: #fff; }
-.omni-badge.omni-badge--solid.grade-badge--d { background: var(--aetheus-grade-d); color: #fff; }
-.omni-badge.omni-badge--solid.grade-badge--e { background: var(--aetheus-grade-e); color: #fff; }
-.omni-badge.omni-badge--solid.grade-badge--f { background: var(--aetheus-grade-f); color: #fff; }
+.omni-badge.omni-badge--solid.grade-badge--a { background: var(--aetheus-grade-a); color: var(--aetheus-grade-a-text); }
+.omni-badge.omni-badge--solid.grade-badge--b { background: var(--aetheus-grade-b); color: var(--aetheus-grade-b-text); }
+.omni-badge.omni-badge--solid.grade-badge--c { background: var(--aetheus-grade-c); color: var(--aetheus-grade-c-text); }
+.omni-badge.omni-badge--solid.grade-badge--d { background: var(--aetheus-grade-d); color: var(--aetheus-grade-d-text); }
+.omni-badge.omni-badge--solid.grade-badge--e { background: var(--aetheus-grade-e); color: var(--aetheus-grade-e-text); }
+.omni-badge.omni-badge--solid.grade-badge--f { background: var(--aetheus-grade-f); color: var(--aetheus-grade-f-text); }
 
 /* Recette R-228: on /notifications an unread row reads in bold until it is read. */
 .omni-data-grid tr.notification-row--unread > td { font-weight: 700; }
@@ -9231,4 +9252,23 @@ a.short-id__text:hover {
    column, which the row stretches, so the four share one height (border-box since OE 1.4.0, R2-006). */
 .app-performance-tile {
     height: 100%;
+}
+
+/* Recette R2-030: the bar of a running service action is thick enough to be seen (OE draws 2px). */
+.service-actions-in-flight .omni-progress {
+    --omni-progress-thickness: 4px;
+}
+
+/* Recette R2-059: the steps to a working mail server, on the page shown before the setup. */
+.mail-setup-guide-steps {
+    display: grid;
+    gap: 0.25rem;
+    margin: 0.25rem 0 0;
+    padding-left: 1.25rem;
+}
+
+/* Recette R2-071: a run warning carries commit hashes and release names with no break point; on a
+   phone they ran past the alert. Long words wrap, so the whole message stays readable. */
+.run-warning-line {
+    overflow-wrap: anywhere;
 }

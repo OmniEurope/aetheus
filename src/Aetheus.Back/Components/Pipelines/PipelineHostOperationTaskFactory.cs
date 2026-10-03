@@ -52,7 +52,8 @@ public sealed class PipelineHostOperationTaskFactory(
     IConfiguration configuration,
     IAppDeployEnvProvider appDeployEnv,
     ILogger<PipelineHostOperationTaskFactory> logger,
-    TimeProvider timeProvider) : IPipelineHostOperationTaskFactory
+    TimeProvider timeProvider,
+    IPipelineResourceLockRepository? resourceLocks = null) : IPipelineHostOperationTaskFactory
 {
 
     private async Task FailPipelineOperationStepAsync(
@@ -456,6 +457,7 @@ public sealed class PipelineHostOperationTaskFactory(
             await FailAsync(bindingError).ConfigureAwait(false);
             return;
         }
+        await BlueGreenRunOwnership.StampAsync(binding!.Variables, runId, resourceLocks, ct).ConfigureAwait(false);
         if (binding!.SkippedComposeEnv.Count > 0)
             await repo.AppendRunWarningsAsync(runId, [$"Blue-green step '{stepRun.StepName}': compose_env did not forward {string.Join(", ", binding.SkippedComposeEnv)}, which this run does not define at this point."], ct).ConfigureAwait(false);
 

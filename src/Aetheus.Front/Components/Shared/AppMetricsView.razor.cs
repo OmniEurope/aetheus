@@ -47,8 +47,7 @@ public partial class AppMetricsView
     private string AxisTitle => string.IsNullOrWhiteSpace(_unit) ? (_selectedMetric ?? string.Empty) : _unit;
 
     // Time labels only need the date once the window spans more than a day.
-    private string TimeFormatString => _hours <= 24 ? "{0:HH:mm}" : "{0:MM-dd HH:mm}";
-    private string TimeLabel(DateTime value) => value.ToString(_hours <= 24 ? "HH:mm" : "MM-dd HH:mm");
+    private string TimeLabel(DateTime value) => _hours <= 24 ? value.ToString("t") : DateDisplay.DayMonthTime(value);
     private IReadOnlyList<OmniChartPoint> MetricPoints => OmniChartData.Timed(_points, point => point.Timestamp, point => point.Value, point => TimeLabel(point.Timestamp));
     private IReadOnlyList<OmniChartPoint> MinimumPoints => OmniChartData.Timed(_bandPoints, point => point.Timestamp, point => point.Min, point => TimeLabel(point.Timestamp));
     private IReadOnlyList<OmniChartPoint> MaximumPoints => OmniChartData.Timed(_bandPoints, point => point.Timestamp, point => point.Max, point => TimeLabel(point.Timestamp));

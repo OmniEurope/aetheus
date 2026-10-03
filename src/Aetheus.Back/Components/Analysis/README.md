@@ -10,9 +10,10 @@ All routes are under `/api/analysis` and require an authenticated user unless a 
 | Endpoint group | Auth | Description |
 |---|---|---|
 | `/runs/{runId}/reports`, `/runs/{runId}/gate` | `AgentToken`, assigned runner | Publish one bounded scanner report and read the aggregated run gate |
-| `/runs/{runId}/result` | Pipeline Read | Read the aggregated gate result from the pipeline run UI |
+| `/runs/{runId}/result` | Pipeline Read | Read the aggregated gate result from the pipeline run UI (a finished run's result is cached per stamp, R-485) |
+| `/runs/findings` | Pipeline Read on every run in `RunIds` | One page of the findings a run and the runs it triggered observed, with the counts of the whole set (R-485) |
 | `/portfolio` | User + resource filtering | Paginated cross-project security and quality portfolio |
-| `/projects/{projectId}/findings`, `/findings/{findingId}/*` | Project Read/Admin | Findings, occurrences, immutable governance decisions |
+| `/projects/{projectId}/findings`, `/findings/{findingId}/*` | Project Read/Admin | Findings, occurrences, immutable governance decisions; `DELETE /findings/{findingId}/decisions/active` (Project Admin, the same right as deciding) revokes the active decision, kept and audited in the history, and puts the finding back to Open unless a later scan found it fixed (R2-027) |
 | `/projects/{projectId}/summary`, `/metrics`, `/components`, `/reports` | Project Read | Project dashboards, trends, architecture graphs, SBOM and report history |
 | `/projects/{projectId}/tracking`, `/vulnerabilities` | Project Read | Dependency-Track state and continuous vulnerability observations |
 | `/projects/{projectId}/policies`, `/exceptions` | Project Read/Admin | Project policy hierarchy and expiring exceptions |
@@ -22,6 +23,8 @@ All routes are under `/api/analysis` and require an authenticated user unless a 
 
 - `AnalysisController` - resource-scoped API and runner-bound ingestion boundary.
 - `IAnalysisService` / `AnalysisService` - quotas, idempotent normalization, immutable policy revisions, governance audit, and real-time notifications.
+- `IAnalysisFindingDecisionService` / `AnalysisFindingDecisionService` - manual finding decisions: read, decide, and revert the active one.
+- `IAnalysisRunResultService` / `AnalysisRunResultService` - a run's analysis result and its paginated findings, read from the run's stamp; `AnalysisRunResultCache` reuses a finished run's result while its stamp holds.
 - `IAnalysisRepository` / `AnalysisRepository` - persistence facade over core, governance, and insight repositories.
 - `AnalysisReportNormalizer` - SARIF, metrics, native scanner, CycloneDX, and SPDX normalization.
 - `AnalysisPolicyEngine` - deterministic built-in and scoped gates with complete immutable evaluation snapshots.

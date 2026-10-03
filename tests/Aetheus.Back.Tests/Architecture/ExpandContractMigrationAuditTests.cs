@@ -11,7 +11,7 @@ public sealed partial class ExpandContractMigrationAuditTests
     [Fact]
     public void FutureMigrationUpMethods_RespectExpandContract()
     {
-        var migrations = RepositoryScan.Enumerate(Path.Combine(FindRepoRoot(), "src", "Aetheus.Back", "Data", "Migrations"), "*.cs", SearchOption.TopDirectoryOnly)
+        var migrations = RepositoryScan.EnumerateTopLevel(Path.Combine(FindRepoRoot(), "src", "Aetheus.Back", "Data", "Migrations"), "*.cs")
             .Where(path => !path.EndsWith(".Designer.cs", StringComparison.Ordinal)
                            && !path.EndsWith("ModelSnapshot.cs", StringComparison.Ordinal)
                            && string.CompareOrdinal(Path.GetFileName(path), GuardBaseline) > 0)

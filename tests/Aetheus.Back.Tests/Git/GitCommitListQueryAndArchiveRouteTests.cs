@@ -101,6 +101,17 @@ public class GitCommitListQueryAndArchiveRouteTests
         => Assert.Throws<BadRequestException>(() => GitCommitListQuery.Parse([Filter("SourceRef", op, "main")]));
 
     [Fact]
+    public void TwoFiltersOnOneColumn_SharingNoValue_AreRefused_NotReadAsNoFilter()
+    {
+        Assert.Throws<BadRequestException>(() => GitCommitListQuery.Parse([
+            Filter("SourceRef", GridFilterOperator.In, List("main")),
+            Filter("SourceRef", GridFilterOperator.In, List("develop"))]));
+        Assert.Throws<BadRequestException>(() => GitCommitListQuery.Parse([
+            Filter("AuthorName", GridFilterOperator.In, List("Alice")),
+            Filter("AuthorName", GridFilterOperator.In, List("Bob"))]));
+    }
+
+    [Fact]
     public void Date_OrLogic_OrEqualsOrGarbage_IsRefused()
     {
         Assert.Throws<BadRequestException>(() => GitCommitListQuery.Parse([Filter("CommitDate", GridFilterOperator.GreaterThanOrEqual,

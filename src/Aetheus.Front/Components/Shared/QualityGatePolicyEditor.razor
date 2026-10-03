@@ -190,7 +190,8 @@ else
                     @L["QualityGateLatestRunVerdict", _preview.LatestRunGate.PipelineRunId]:
                     <strong>@_preview.LatestRunGate.Status</strong>
                     · @L["AnalysisGrade"]:
-                    <strong>@(_preview.LatestRunGate.Grade?.OverallGrade?.ToString() ?? L["Incomplete"])</strong>
+                    @* Recette R2-050: the grade drawn as everywhere else, its colour included. *@
+                    @if (_preview.LatestRunGate.Grade?.OverallGrade is { } overall) { <GradeBadge Value="@overall" /> } else { <strong>@L["Incomplete"]</strong> }
                 </OmniText>
             }
         </OmniAlert>

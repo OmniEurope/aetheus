@@ -25,6 +25,10 @@ public static class ServersModuleExtensions
         // module, 2026-09-25).
         services.AddScoped<IDomainEventHandler<Events.ServerWentOfflineEvent>, DomainEventAuditHandler<Events.ServerWentOfflineEvent>>();
         services.AddScoped<IDomainEventHandler<Events.ServerWentOfflineEvent>, Handlers.ServerOfflineNotificationHandler>();
+        // Audit R2-023 follow-up: a sudoers drift is kept in the audit trail and the administrators'
+        // notifications, not only pushed to the browsers connected when it is seen.
+        services.AddScoped<IDomainEventHandler<Events.SudoersDriftDetectedEvent>, DomainEventAuditHandler<Events.SudoersDriftDetectedEvent>>();
+        services.AddScoped<IDomainEventHandler<Events.SudoersDriftDetectedEvent>, Handlers.SudoersDriftNotificationHandler>();
         return services;
     }
 }

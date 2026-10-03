@@ -8,9 +8,10 @@ public readonly record struct WebAnalyticsPurgeResult(
     int PeriodIdentities,
     int Aggregates,
     int Pages,
-    int Rejections)
+    int Rejections,
+    int IngestVolumes)
 {
-    public int Total => Events + Sessions + PeriodIdentities + Aggregates + Pages + Rejections;
+    public int Total => Events + Sessions + PeriodIdentities + Aggregates + Pages + Rejections + IngestVolumes;
 }
 
 public interface IAppWebAnalyticsRepository
@@ -29,6 +30,9 @@ public interface IAppWebAnalyticsRepository
 
     /// <summary>The apps holding raw audience rows, with their storage budget (0 when none was set).</summary>
     Task<IReadOnlyList<WebAnalyticsStorageBudget>> GetStorageBudgetsAsync(CancellationToken ct = default);
+
+    /// <summary>Audit R2-007 follow-up: the events the app accepted since <paramref name="sinceUtc"/>, all colours.</summary>
+    Task<int> CountAcceptedSinceAsync(int appId, DateTime sinceUtc, CancellationToken ct = default);
     Task<HashSet<string>> GetRouteNamesAsync(int appId, CancellationToken ct = default);
     Task RecordRejectionAsync(int appId, string reasonCode, int count, DateTime occurredAtUtc, CancellationToken ct = default);
     Task<AppWebAnalyticsSummaryDto> GetSummaryAsync(

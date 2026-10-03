@@ -446,16 +446,18 @@ public class ProjectQualitySectionTests : BunitContext
         var cut = Render<ProjectQualitySection>(parameters => parameters
             .Add(component => component.ProjectId, projectId)
             .AddCascadingValue(menu));
-        // Recette R-431: "Export all" is an entry of the project header's "..." menu, enabled once the
-        // findings are counted, and no longer a button row above the grid.
-        cut.WaitForState(() => menu.Actions is [{ Disabled: false }], TimeSpan.FromSeconds(3));
-        var export = Assert.Single(menu.Actions);
-        Assert.Equal("AnalysisExportAllAiPrompt", export.Text);
-        Assert.DoesNotContain(cut.FindAll("button"), button =>
-            button.TextContent.Contains("AnalysisExportAllAiPrompt", StringComparison.Ordinal));
+        // Recette R2-054: "Export all" is the blue Markdown button under the findings table, enabled once
+        // the findings are counted; the header's "..." menu no longer holds it (R-431 is undone).
+        cut.WaitForState(() => cut.FindAll("button.analysis-findings-export-button:not([disabled])").Count == 1, TimeSpan.FromSeconds(3));
+        var export = cut.Find("button.analysis-findings-export-button");
+        Assert.Contains("AnalysisExportAllAiPrompt", export.TextContent, StringComparison.Ordinal);
+        Assert.Contains("omni-button--primary", export.ClassName, StringComparison.Ordinal);
+        Assert.Empty(menu.Actions);
+        var grid = cut.Find(".analysis-table");
+        Assert.Contains("aetheus-grid-fullheight", grid.ClassList);
+        Assert.True(grid.CompareDocumentPosition(export).HasFlag(AngleSharp.Dom.DocumentPositions.Following));
 
-        Assert.Contains("aetheus-grid-fullheight", cut.Find(".analysis-table").ClassList);
-        await cut.InvokeAsync(export.Run);
+        await cut.InvokeAsync(() => export.Click());
 
         cut.WaitForAssertion(() => Assert.Contains(
             JSInterop.Invocations,

@@ -23,7 +23,13 @@ case "$ACTION" in
   *) echo "Action must be commit or rollback." >&2; exit 2 ;;
 esac
 
-test -d "$TRANSACTION_DIR" || { echo "FATAL: fast deployment transaction is missing." >&2; exit 1; }
+# No transaction means the deployment stopped before opening one, so before any switch: the live
+# colour is the one it found, and there is nothing to undo. The failure that stopped it already fails
+# the run; this stage only reported a second, false one (run 2525, recette R2-081).
+if [ ! -d "$TRANSACTION_DIR" ]; then
+  echo ">>> No fast deployment transaction is open: the deployment never switched colour, nothing to roll back."
+  exit 0
+fi
 test "$(cat "$TRANSACTION_DIR/state" 2>/dev/null)" = HOST_COMMITTED_PENDING_RELEASE \
   || { echo "FATAL: fast deployment transaction is not rollback-eligible." >&2; exit 1; }
 test "$(cat "$TRANSACTION_DIR/source-commit" 2>/dev/null)" = "$EXPECTED_COMMIT" \

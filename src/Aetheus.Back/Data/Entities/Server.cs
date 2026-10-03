@@ -140,6 +140,13 @@ public class Server
     public string? SudoersDriftAlertedFingerprint { get; set; }
 
     /// <summary>
+    /// Audit R2-023 follow-up: when the drifted state of <see cref="SudoersDriftAlertedFingerprint"/> was
+    /// last alerted. While the drift lasts the alert is raised again once this is older than the reminder
+    /// interval; the fingerprint only deduplicates within it. Null while the drop-ins match the baseline.
+    /// </summary>
+    public DateTime? SudoersDriftAlertedAt { get; set; }
+
+    /// <summary>
     /// S-TECH-CDUI: the agent's most recent capability diagnostics (a drop-in present but unreadable, a
     /// sudo probe that failed, …), persisted so an operator can see WHY a capability is OFF from the UI -
     /// not only the backend log. Stored as a compact JSON array of strings; null/empty when the last

@@ -165,4 +165,74 @@ public sealed class PostgresLeaderLeaseIntegrationTests(PostgresFixture fixture)
         secondStop.Cancel();
         await second.WaitAsync(TimeSpan.FromSeconds(5), cancellationToken: TestContext.Current.CancellationToken);
     }
+
+    private sealed class FakeLiveProbe(InstanceServingState state) : ILiveInstanceProbe
+    {
+        public string InstanceId => "test";
+        public InstanceServingState State { get; set; } = state;
+    }
+
+    private IConfiguration Configuration() => new ConfigurationBuilder()
+        .AddInMemoryCollection(new Dictionary<string, string?> { ["ConnectionStrings:Default"] = fixture.ConnectionString })
+        .Build();
+
+    [Fact]
+    public async Task ReserveColour_NeverTakesTheLease()
+    {
+        // Decision of 2026-10-02: the reserve colour runs the previous release and must not lead.
+        var lease = new PostgresLeaderLease(Configuration(), NullLogger<PostgresLeaderLease>.Instance, FastRetryDelay,
+            new FakeLiveProbe(InstanceServingState.Standby));
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var stop = new CancellationTokenSource();
+
+        var run = lease.RunAsLeaderAsync("integration:reserve-never-leads", _ =>
+        {
+            entered.TrySetResult();
+            return Task.CompletedTask;
+        }, stop.Token);
+
+        await Task.Delay(TimeSpan.FromMilliseconds(800), TestContext.Current.CancellationToken);
+        Assert.False(entered.Task.IsCompleted, "A reserve colour entered leader work.");
+        stop.Cancel();
+        await run.WaitAsync(TimeSpan.FromSeconds(5), cancellationToken: TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
+    public async Task LeaderThatBecomesReserve_YieldsTheLeaseToTheLiveColour()
+    {
+        var oldColourProbe = new FakeLiveProbe(InstanceServingState.Live);
+        var oldColour = new PostgresLeaderLease(Configuration(), NullLogger<PostgresLeaderLease>.Instance, FastRetryDelay,
+            oldColourProbe, heartbeatInterval: TimeSpan.FromMilliseconds(100));
+        var newColour = new PostgresLeaderLease(Configuration(), NullLogger<PostgresLeaderLease>.Instance, FastRetryDelay,
+            new FakeLiveProbe(InstanceServingState.Live));
+        var oldEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var oldCancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var newEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+
+        var old = oldColour.RunAsLeaderAsync("integration:reserve-yields", async ct =>
+        {
+            oldEntered.TrySetResult();
+            try { await Task.Delay(Timeout.InfiniteTimeSpan, ct); }
+            catch (OperationCanceledException) { oldCancelled.TrySetResult(); throw; }
+        }, stop.Token);
+        await oldEntered.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+
+        var current = newColour.RunAsLeaderAsync("integration:reserve-yields", async ct =>
+        {
+            newEntered.TrySetResult();
+            await Task.Delay(Timeout.InfiniteTimeSpan, ct);
+        }, stop.Token);
+        await Task.Delay(TimeSpan.FromMilliseconds(500), TestContext.Current.CancellationToken);
+        Assert.False(newEntered.Task.IsCompleted, "The new colour led while the old one still held the lease.");
+
+        // Traffic moves to the new colour: the old one reads itself in reserve and hands the lease over.
+        oldColourProbe.State = InstanceServingState.Standby;
+        await oldCancelled.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        await newEntered.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        Assert.False(old.IsCompleted, "The reserve colour must keep waiting for the lease, not stop.");
+
+        stop.Cancel();
+        await Task.WhenAll(old, current).WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+    }
 }

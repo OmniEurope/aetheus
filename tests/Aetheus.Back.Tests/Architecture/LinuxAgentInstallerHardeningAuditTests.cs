@@ -132,6 +132,23 @@ public sealed class LinuxAgentInstallerHardeningAuditTests
     }
 
     [Fact]
+    public void Homes_StayHidden_SaveTheSnapDataDirectoryCertbotNeeds()
+    {
+        // Snap certbot cannot start without /root/snap (nightly 2503, 2026-10-02); nothing wider opens.
+        var installer = ReadInstaller();
+        var unit = LinuxHostConfigTemplates.Read("agent/aetheus-agent.service");
+
+        Assert.Contains("#{PROTECT_HOME_BLOCK}#", unit, StringComparison.Ordinal);
+        Assert.Contains("PROTECT_HOME_BLOCK=\"ProtectHome=true\"", installer, StringComparison.Ordinal);
+        Assert.Contains("PROTECT_HOME_BLOCK=\"ProtectHome=tmpfs\nBindPaths=-/root/snap\"", installer, StringComparison.Ordinal);
+        // The self-update worker hides the homes too: a bare mkdir there aborted the upgrade (2026-10-03).
+        Assert.Contains("if ! mkdir -p /root/snap 2>/dev/null; then", installer, StringComparison.Ordinal);
+        Assert.DoesNotContain("\n        mkdir -p /root/snap\n", installer, StringComparison.Ordinal);
+        Assert.DoesNotContain("ProtectHome=false", installer, StringComparison.Ordinal);
+        Assert.DoesNotContain("ProtectHome=read-only", installer, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void MailManage_UsesLiteralKeyFilteringAndOwnsBothDkimOutputs()
     {
         // R-249: the helper is the mail/mail-manage template the installer renders.

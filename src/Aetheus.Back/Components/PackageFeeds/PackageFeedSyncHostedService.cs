@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
+using Aetheus.Back.Services;
+
 namespace Aetheus.Back.Components.PackageFeeds;
 
 /// <summary>
@@ -9,9 +11,16 @@ namespace Aetheus.Back.Components.PackageFeeds;
 public sealed class PackageFeedSyncHostedService(
     IServiceProvider services,
     IConfiguration configuration,
-    ILogger<PackageFeedSyncHostedService> logger) : BackgroundService
+    ILogger<PackageFeedSyncHostedService> logger,
+    IPostgresLeaderLease? leaderLease = null) : BackgroundService
 {
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    // Only the live colour runs it (decision of 2026-10-02, PostgresLeaderLease).
+    protected override Task ExecuteAsync(CancellationToken stoppingToken) =>
+        leaderLease is null
+            ? RunLeaderLoopAsync(stoppingToken)
+            : leaderLease.RunAsLeaderAsync("aetheus:package-feed-sync", RunLeaderLoopAsync, stoppingToken);
+
+    private async Task RunLeaderLoopAsync(CancellationToken stoppingToken)
     {
         var intervalMinutes = configuration.GetValue("PackageFeeds:SyncIntervalMinutes", 0);
         if (intervalMinutes <= 0)

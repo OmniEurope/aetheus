@@ -82,8 +82,16 @@ internal static class GitCommitListQuery
         return values;
     }
 
-    private static IReadOnlyList<string> Intersect(IReadOnlyList<string>? previous, IReadOnlyList<string> values) =>
-        previous is null ? [.. values] : [.. previous.Intersect(values, StringComparer.Ordinal)];
+    // Two filters on one column that share no value would leave an empty list, which the log reader
+    // reads as "no filter" and answers with every commit; refuse it instead (session audit 2026-10-01).
+    private static IReadOnlyList<string> Intersect(IReadOnlyList<string>? previous, IReadOnlyList<string> values)
+    {
+        if (previous is null) return [.. values];
+        IReadOnlyList<string> shared = [.. previous.Intersect(values, StringComparer.Ordinal)];
+        return shared.Count > 0
+            ? shared
+            : throw new BadRequestException("Two filters on the same column share no value.");
+    }
 
     // The grid's date range arrives as a lower bound (>=) and an upper one (<), possibly alone. git's
     // --since/--until are inclusive to the second, so a strict bound moves by one second.

@@ -2,18 +2,18 @@
 
 @* --- Status bar --- *@
 <OmniRow Gap="OmniSpacing.Small" Align="OmniAlignment.Center" Class="omni-u-mb-lg">
-    <OmniBadge Fill="OmniFill.Solid" Tone="@(Mail.IsInstalled ? OmniTone.Success : OmniTone.Neutral)">@(Mail.IsInstalled ? L["Installed"] : L["NotInstalled"])</OmniBadge>
+    <OmniBadge Fill="OmniFill.Solid" Tone="@(Mail.IsInstalled ? OmniTone.Success : OmniTone.Neutral)">@(Mail.IsInstalled ? L["Installed"] : L["MailNotConfigured"])</OmniBadge>
     @if (Mail.IsInstalled)
     {
         <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.XSmall" Align="OmniAlignment.Center">
             <span class="aetheus-badge-dot mail-status-dot @(Mail.IsPostfixRunning ? "is-running" : "")"></span>
-            <OmniBadge Fill="OmniFill.Solid" Tone="@(Mail.IsPostfixRunning ? OmniTone.Success : OmniTone.Danger)">
+            <OmniBadge Fill="OmniFill.Solid" Tone="@(Mail.IsPostfixRunning ? OmniTone.Accent : OmniTone.Danger)">
                 <OmniIcon Name="@MaterialIconMap.Resolve(Mail.IsPostfixRunning ? "check" : "close")" /> @L["Postfix"]
             </OmniBadge>
         </OmniStack>
         <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.XSmall" Align="OmniAlignment.Center">
             <span class="aetheus-badge-dot mail-status-dot @(Mail.IsDovecotRunning ? "is-running" : "")"></span>
-            <OmniBadge Fill="OmniFill.Solid" Tone="@(Mail.IsDovecotRunning ? OmniTone.Success : OmniTone.Danger)">
+            <OmniBadge Fill="OmniFill.Solid" Tone="@(Mail.IsDovecotRunning ? OmniTone.Accent : OmniTone.Danger)">
                 <OmniIcon Name="@MaterialIconMap.Resolve(Mail.IsDovecotRunning ? "check" : "close")" /> @L["Dovecot"]
             </OmniBadge>
         </OmniStack>
@@ -31,7 +31,7 @@
 
     @if (!Mail.IsInstalled)
     {
-        <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@OpenSetupDialogAsync" Disabled="@(!Server.MailSetupAvailable)" title="@(Server.MailSetupAvailable ? null : L["MailSetupCapabilityRequired"].Value)"><OmniIcon Name="OmniIconName.RocketLaunch" /> <span>@L["MailSetup"]</span></OmniButton>
+        <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@OpenSetupDialogAsync" Disabled="@(!Server.MailSetupAvailable)" title="@(Server.MailSetupAvailable ? null : L["MailSetupCapabilityRequired"].Value)"><OmniIcon Name="OmniIconName.RocketLaunch" /> <span>@L["MailSetupAction"]</span></OmniButton>
     }
     else
     {
@@ -50,6 +50,25 @@
         </ChildContent></OmniSplitButton>
     }
 </OmniRow>
+
+@* Recette R2-059: "installed" means a configured mail stack (Postfix configured, Dovecot, OpenDKIM),
+   not one package: Dovecot installed alone from the Services tab read "Not installed" on an empty page.
+   The page now says what is missing and the order of the work. *@
+@if (!Mail.IsInstalled)
+{
+    <OmniAlert Severity="OmniSeverity.Info" Title="@L["MailNotConfiguredTitle"]" Class="omni-u-mb-lg mail-setup-guide">
+        <ol class="mail-setup-guide-steps">
+            <li>@L["MailGuideServicesNotEnough"]</li>
+            <li>@L["MailGuidePrerequisites"]</li>
+            <li>@L["MailGuideRunSetup"]</li>
+            <li>@L["MailGuideAfterSetup"]</li>
+        </ol>
+        @if (!Server.MailSetupAvailable)
+        {
+            <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-m-0 mail-setup-capability">@L["MailSetupCapabilityRequired"]</OmniText>
+        }
+    </OmniAlert>
+}
 
 @if (Mail.IsInstalled)
 {
@@ -154,7 +173,7 @@
                         </OmniDataGridColumn>
                         <OmniDataGridColumn TItem="MailAccountDto" Property="CreatedAt" Title="@L["Created"]" Width="140px" Filterable="true" FilterType="OmniDataGridColumnFilterType.DateRange" >
                             <Template Context="a">
-                                <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-m-0">@a.CreatedAt.ToString("yyyy-MM-dd")</OmniText>
+                                <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-m-0">@a.CreatedAt.ToString("d")</OmniText>
                             </Template>
                         </OmniDataGridColumn>
                         <OmniDataGridColumn TItem="MailAccountDto" Title="@L["Actions"]" Width="100px" Sortable="false">

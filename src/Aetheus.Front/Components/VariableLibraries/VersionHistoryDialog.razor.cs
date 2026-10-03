@@ -61,12 +61,18 @@ public partial class VersionHistoryDialog
         _restoring = true;
         try
         {
-            var updated = await Api.Variables.UpdateVariableEntryAsync(LibraryId, EntryId, new UpdateVariableEntryRequest
+            var outcome = await Api.Variables.UpdateVariableEntryAsync(LibraryId, EntryId, new UpdateVariableEntryRequest
             {
                 Key = version.Key,
                 Value = version.Value
             });
-            if (updated is null)
+            if (outcome.StatusCode == System.Net.HttpStatusCode.BadRequest)
+            {
+                // The restored key was given to another entry since: R2-065.
+                Toast.Error("Error", "LibraryEntryKeyExists", version.Key);
+                return;
+            }
+            if (!outcome.IsSuccess)
             {
                 Toast.Error("Error", "OperationFailed");
                 return;

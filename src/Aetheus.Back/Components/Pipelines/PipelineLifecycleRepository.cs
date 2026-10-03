@@ -356,7 +356,10 @@ internal sealed class PipelineLifecycleRepository(AppDbContext db, TimeProvider 
                                              || t.Status == TaskExecutionStatus.Assigned
                                              || t.Status == TaskExecutionStatus.Running)
                         // Not legitimately waiting on a child pipeline (that case is the trigger-step sweep).
-                        && !r.StepRuns.Any(s => s.Status == TaskExecutionStatus.Running && s.TriggeredRunId != null))
+                        && !r.StepRuns.Any(s => s.Status == TaskExecutionStatus.Running && s.TriggeredRunId != null)
+                        // Nor on an environment another run holds: that wait ends with the holder, whose
+                        // own tasks time out if it dies (decision of 2026-10-02).
+                        && !(r.WaitingReason != null && r.WaitingReason.Contains(PipelineEnvironmentLockGate.WaitMarker)))
             .Select(r => r.Id)
             .ToListAsync(ct).ConfigureAwait(false);
 

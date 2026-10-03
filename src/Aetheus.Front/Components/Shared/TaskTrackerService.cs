@@ -132,6 +132,11 @@ public sealed class TaskTrackerService : IAsyncDisposable
         _hub.On<ServerTaskDto>("TaskQueued", task => Upsert(task));
         _hub.On<TaskStartedEvent>("TaskStarted", evt => MarkRunning(evt.TaskId, evt.StartedAt));
         _hub.On<TaskCompletedNotification>("TaskCompleted", HandleTerminal);
+        // Recette R2-056: an agent update ends its task on the new agent's first heartbeat (or its
+        // deadline), a path that sends AgentUpdateConfirmed/Failed and no TaskCompleted, so the chip
+        // stayed until a reload. Either event re-reads the active tasks.
+        _hub.On<int, int>("AgentUpdateConfirmed", (_, _) => SeedActiveAsync(CancellationToken.None));
+        _hub.On<int, int>("AgentUpdateFailed", (_, _) => SeedActiveAsync(CancellationToken.None));
 
         // Refetch from /active after every (re)connect to recover any events missed while
         // disconnected. Same call seeds the initial set on first connect.

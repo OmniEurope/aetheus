@@ -22,7 +22,9 @@ déploiement ne change pas le commit d'une release existante : il reste celui de
 
 ## Points d’entrée
 
-- API ou consommateur principal : `ReleasesController.cs`.
+- API ou consommateur principal : `ReleasesController.cs` (y compris les releases d'un serveur,
+  `GET /api/servers/{serverId}/releases` et son `filter-values`) et `ReleaseProvenanceController.cs`
+  (`GET /api/releases/{id}/provenance`).
 - Enregistrement DI : `ReleasesModuleExtensions.cs`.
 - Les interfaces `I*` définissent les contrats du module; les services portent la logique et les repositories l’accès persistant lorsqu’il existe.
 

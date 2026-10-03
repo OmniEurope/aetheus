@@ -57,11 +57,13 @@ public sealed class PipelineRunFinalizer(
     IHubContext<PipelineHub> pipelineHub,
     IDomainEventDispatcher domainEvents,
     ISecretMaskingService secretMasking,
-    TimeProvider timeProvider) : IPipelineRunFinalizer
+    TimeProvider timeProvider,
+    IPipelineResourceLockRepository? resourceLocks = null) : IPipelineRunFinalizer
 {
     public async Task CompleteRunAsync(int pipelineRunId, PipelineStatus status, CancellationToken ct)
     {
         await repo.UpdatePipelineRunStatusAsync(pipelineRunId, status, ct).ConfigureAwait(false);
+        await ReleaseLocksAsync(pipelineRunId, status, ct).ConfigureAwait(false);
         // PLAN-005 lot 3 / D34: an ended run leaves nothing to approve.
         if (status.IsTerminal())
             await repo.CloseApprovalsOfEndedRunsAsync(
@@ -118,9 +120,21 @@ public sealed class PipelineRunFinalizer(
         await repo.SaveChangesAsync(ct).ConfigureAwait(false);
 
         await repo.UpdatePipelineRunStatusAsync(runId, PipelineStatus.Failed, ct).ConfigureAwait(false);
+        await ReleaseLocksAsync(runId, PipelineStatus.Failed, ct).ConfigureAwait(false);
         var pipelineId = await repo.GetPipelineIdForRunAsync(runId, ct).ConfigureAwait(false);
         var groups = HubGroups.PipelineRunUpdates(runId, pipelineId);
         await pipelineHub.Clients.Groups(groups).SendAsync("PipelineRunCompleted", runId, PipelineStatus.Failed, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The environments an ended run held are free again (decision of 2026-10-02). Eager only: a lock
+    /// whose run is no longer active never blocks anyone anyway (PipelineResourceLockRepository), so a
+    /// run that ends on a path that skips this still frees what it held.
+    /// </summary>
+    private async Task ReleaseLocksAsync(int runId, PipelineStatus status, CancellationToken ct)
+    {
+        if (resourceLocks is null || !status.IsTerminal()) return;
+        await resourceLocks.ReleaseAsync(runId, ct).ConfigureAwait(false);
     }
 
     public async Task FailStuckRunAsync(int runId, CancellationToken ct)

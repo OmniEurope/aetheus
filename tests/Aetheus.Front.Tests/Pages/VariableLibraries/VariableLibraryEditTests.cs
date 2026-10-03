@@ -172,6 +172,24 @@ public class VariableLibraryEditTests : BunitContext
     }
 
     [Fact]
+    public async Task AddEntry_KeyAlreadyInTheLibrary_SaysSo()
+    {
+        SetupEditMocks();
+        _handler.SetJsonResponse(HttpMethod.Post, "api/variable-libraries/1/entries",
+            new ApiError { Message = "The key 'NEW_VAR' already exists in this library." }, System.Net.HttpStatusCode.BadRequest);
+        var cut = Render<VariableLibraryEdit>(p => p.Add(x => x.Id, 1));
+
+        SetFormValue(cut.Instance, "_newEntry", "Key", "NEW_VAR");
+        await cut.InvokeAsync(() => InvokeFormSubmitAsync(cut.Instance, "AddEntry", "_newEntry"));
+
+        // Recette R2-065: one error toast saying the key exists (the test localizer returns the key), never a silent no-op nor a success.
+        var toasts = Services.GetRequiredService<OmniOverlayService>().Toasts();
+        var error = Assert.Single(toasts, m => m.Severity == OmniSeverity.Danger);
+        Assert.Contains("LibraryEntryKeyExists", error.Summary + error.Detail, StringComparison.Ordinal);
+        Assert.DoesNotContain(toasts, m => m.Severity == OmniSeverity.Success);
+    }
+
+    [Fact]
     public void EditEntry_SetsFields()
     {
         SetupEditMocks();

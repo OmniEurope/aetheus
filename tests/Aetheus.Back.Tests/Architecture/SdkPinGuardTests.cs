@@ -1,16 +1,29 @@
+// kit-model SdkPinGuardTests 1
 // SPDX-License-Identifier: EUPL-1.2
+//
+// Guard test for rule STD-SDKPIN (docs/code-rules.md): the three Microsoft.CodeAnalysis.* packages
+// must stay on the Roslyn version shipped by the compiler of the global.json SDK floor. An analyzer
+// compiled against a newer Roslyn than the host compiler is rejected (CS9057) on every machine still
+// at the floor.
+//
+// Copy as is into a test project (NUnit) and adjust only the namespace. It walks up from the test
+// binary to the repository root (the folder holding global.json), so no path constant is needed.
+// The guard checks the PIN, never the floor itself: bumping global.json is a deliberate commit that
+// moves both files together.
+// Keep the first line of this file in the copy: it tells the kit's verify-rules.ps1 which version of
+// the model the copy implements (STD-KITCOPY).
+//
+// Aetheus copy: the NUnit assertions are written in xUnit, the test framework of this project.
+
+using System;
+using System.IO;
+using System.Linq;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Xunit;
 
 namespace Aetheus.Back.Tests.Architecture;
 
-/// <summary>
-/// STD-SDKPIN (ADR-048): the three Microsoft.CodeAnalysis.* packages stay on the Roslyn version shipped
-/// by the compiler of the global.json SDK floor. An analyzer compiled against a newer Roslyn than the
-/// host compiler is rejected (CS9057) on every machine still at the floor. The guard checks the pin,
-/// never the floor itself: moving global.json is a deliberate commit that moves both files together.
-/// Adapted from the _Generic kit template docs/tests-template/SdkPinGuardTests.cs (NUnit there).
-/// </summary>
 public sealed class SdkPinGuardTests
 {
     /// <summary>SDK feature band of the floor -> Roslyn version its compiler ships.</summary>
@@ -33,39 +46,74 @@ public sealed class SdkPinGuardTests
     [Fact]
     public void CodeAnalysisPackagesMatchTheSdkFloorCompiler()
     {
-        var floor = ReadSdkFloor(Path.Combine(RepositoryScan.Root, "global.json"));
-        var expected = RoslynByBand.FirstOrDefault(entry => floor.StartsWith(entry.Band, StringComparison.Ordinal)).Roslyn;
-        Assert.True(expected is not null,
-            $"SDK floor {floor} is missing from the STD-SDKPIN table: extend RoslynByBand and the kit's code-rules.md.");
+        var root = FindRepositoryRoot();
+        var floor = ReadSdkFloor(Path.Combine(root, "global.json"));
+        var expected = ExpectedRoslyn(floor);
 
-        var packagesProps = File.ReadAllText(Path.Combine(RepositoryScan.Root, "Directory.Packages.props"));
-        var versions = PinnedPackages
-            .Select(package => (Package: package, Version: ReadPackageVersion(packagesProps, package)))
-            .ToList();
-        Assert.All(versions, entry => Assert.True(entry.Version is not null, $"{entry.Package} is not pinned in Directory.Packages.props."));
+        var packagesProps = Path.Combine(root, "Directory.Packages.props");
+        Assert.True(File.Exists(packagesProps),
+            $"Directory.Packages.props introuvable a la racine du depot ({root}).");
 
-        var mismatches = versions
-            .Where(entry => entry.Version != expected)
-            .Select(entry => $"{entry.Package} = {entry.Version} (expected {expected})")
-            .ToList();
-        Assert.True(mismatches.Count == 0,
-            $"SDK floor {floor} ships Roslyn {expected}: " + string.Join("; ", mismatches));
+        var content = File.ReadAllText(packagesProps);
+        var mismatches = PinnedPackages
+            .Select(package => (Package: package, Version: ReadPackageVersion(content, package)))
+            .Where(entry => entry.Version is not null && entry.Version != expected)
+            .Select(entry => $"{entry.Package} = {entry.Version} (attendu {expected})")
+            .ToArray();
+
+        Assert.True(mismatches.Length == 0,
+            $"Plancher SDK {floor} : Roslyn attendu {expected}. Desalignement -> "
+            + string.Join(" ; ", mismatches)
+            + ". Voir STD-SDKPIN dans docs/code-rules.md.");
+    }
+
+    private static string ExpectedRoslyn(string floor)
+    {
+        var match = RoslynByBand.FirstOrDefault(entry => floor.StartsWith(entry.Band, StringComparison.Ordinal));
+        Assert.True(match.Roslyn is not null,
+            $"Plancher SDK {floor} absent de la table STD-SDKPIN : completer RoslynByBand et la table de docs/code-rules.md.");
+        return match.Roslyn;
     }
 
     private static string ReadSdkFloor(string globalJsonPath)
     {
+        Assert.True(File.Exists(globalJsonPath), $"global.json introuvable : {globalJsonPath}");
         using var document = JsonDocument.Parse(File.ReadAllText(globalJsonPath));
         var version = document.RootElement.GetProperty("sdk").GetProperty("version").GetString();
-        Assert.False(string.IsNullOrWhiteSpace(version), "global.json declares no sdk.version.");
+        Assert.False(string.IsNullOrEmpty(version), "global.json : sdk.version vide.");
         return version!;
     }
 
     /// <summary>Version of a PackageVersion/PackageReference entry, or null when the package is absent.</summary>
     private static string? ReadPackageVersion(string content, string package)
     {
-        var match = Regex.Match(
-            content,
-            @"<Package(?:Version|Reference)\s+Include=""" + Regex.Escape(package) + @"""\s+Version=""(?<version>[^""]+)""");
-        return match.Success ? match.Groups["version"].Value : null;
+        var pattern = @"<Package(?:Version|Reference)\s+Include=""" + Regex.Escape(package)
+            + @"""\s+Version=""([^""]+)""";
+        var match = Regex.Match(content, pattern);
+        return match.Success ? match.Groups[1].Value : null;
+    }
+
+    private static string FindRepositoryRoot()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "global.json")))
+        {
+            directory = directory.Parent;
+        }
+
+        Assert.True(directory is not null, "Aucun global.json trouve en remontant depuis le binaire de test.");
+        return directory!.FullName;
+    }
+
+    // Aetheus extension beyond the kit model (candidate for the model): the model skips a package that
+    // is not pinned, this copy also requires the three packages to be pinned, as its earlier version did.
+
+    [Fact]
+    public void CodeAnalysisPackagesArePinned()
+    {
+        var content = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "Directory.Packages.props"));
+        var unpinned = PinnedPackages.Where(package => ReadPackageVersion(content, package) is null).ToArray();
+        Assert.True(unpinned.Length == 0,
+            $"Directory.Packages.props n'epingle pas : {string.Join(", ", unpinned)}. Voir STD-SDKPIN dans docs/code-rules.md.");
     }
 }

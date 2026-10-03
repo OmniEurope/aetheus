@@ -25,6 +25,23 @@ NODE="$(sh "$WORKSPACE/deploy/scripts/ensure-node-runtime.sh")"
 rm -rf "$RESULTS_DIR"
 mkdir -p "$RESULTS_DIR"
 cd "$SOURCE_ROOT"
+# A cold-cache CI run (aetheus-nightly) restores into a package folder of its own run, which exists
+# only in that run's workspace, and the obj/ files restored here still name it. MSBuild then skips
+# every package import guarded by Exists(), xunit.v3's Microsoft.Testing.Platform declaration with
+# them, and dotnet test refuses the project as VSTest (nightly 2497, QA 2502, recette R2-062). A
+# locked restore rebuilds the same graph from the lock files into this host's cache and rewrites
+# obj/ only; the binaries under bin/ stay the restored ones (--no-build below).
+NUGET_PROPS="tests/Aetheus.Back.IntegrationTests/obj/Aetheus.Back.IntegrationTests.csproj.nuget.g.props"
+RESTORED_ROOT="$(sed -n 's:.*<NuGetPackageRoot[^>]*>\(.*\)</NuGetPackageRoot>.*:\1:p' "$NUGET_PROPS" | head -n 1)"
+case "$RESTORED_ROOT" in
+  *'$('*) ;;
+  *)
+    if [ -z "$RESTORED_ROOT" ] || [ ! -d "$RESTORED_ROOT" ]; then
+      echo "The package folder the restored obj/ names ('$RESTORED_ROOT') is absent here; restoring the locked graph into this host's cache."
+      "$DOTNET" restore tests/Aetheus.Back.IntegrationTests -p:Configuration=Release --locked-mode --verbosity minimal
+    fi
+    ;;
+esac
 # The tested source decides the runner, not this script: V runs on Microsoft.Testing.Platform
 # (global.json "test.runner"), while a V-1 released before that move still carries VSTest and its
 # loggers. Both produce the same TRX, which is all the classifier reads.

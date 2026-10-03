@@ -2,13 +2,21 @@
 using Aetheus.Back.Components.Tasks;
 using Aetheus.Back.Configuration;
 using Aetheus.Back.Data.Entities;
+using Aetheus.Back.Services;
 using Cronos;
 
 namespace Aetheus.Back.Components.Rkhunter;
 
-public class RkhunterSchedulerService(IServiceScopeFactory scopeFactory, ILogger<RkhunterSchedulerService> logger, TimeProvider timeProvider) : BackgroundService
+public class RkhunterSchedulerService(IServiceScopeFactory scopeFactory, ILogger<RkhunterSchedulerService> logger, TimeProvider timeProvider,
+    IPostgresLeaderLease? leaderLease = null) : BackgroundService
 {
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    // Only the live colour runs it (decision of 2026-10-02, PostgresLeaderLease).
+    protected override Task ExecuteAsync(CancellationToken stoppingToken) =>
+        leaderLease is null
+            ? RunLeaderLoopAsync(stoppingToken)
+            : leaderLease.RunAsLeaderAsync("aetheus:rkhunter-scheduler", RunLeaderLoopAsync, stoppingToken);
+
+    private async Task RunLeaderLoopAsync(CancellationToken stoppingToken)
     {
         using var timer = new PeriodicTimer(BackendRuntimeDefaults.SchedulerCheckInterval);
 

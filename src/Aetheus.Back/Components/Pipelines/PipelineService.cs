@@ -261,6 +261,8 @@ public class PipelineService(
         errors.AddRange(PipelineRunHelpers.ValidateExecutionRoles(effectiveStages));
         errors.AddRange(PipelineAnalysisGateOrderingValidator.Validate(effectiveStages));
 
+        // A misspelled known key (a guard such as approval_timeout_minutes) is refused, never skipped.
+        errors.AddRange(PipelineYamlDiagnostics.NearMissKeyErrors(yaml, logger));
         PipelineYamlDiagnostics.AppendUnknownPropertyWarnings(yaml, warnings, logger);
 
         return new YamlValidationResultDto

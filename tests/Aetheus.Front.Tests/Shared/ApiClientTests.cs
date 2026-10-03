@@ -1328,7 +1328,17 @@ public class ApiClientTests
     {
         var (api, h) = Create();
         h.Response = new HttpResponseMessage(HttpStatusCode.OK) { Content = Json(new VariableEntryDto { Id = 1 }) };
-        Assert.NotNull(await api.Variables.CreateVariableEntryAsync(1, new CreateVariableEntryRequest(), Xunit.TestContext.Current.CancellationToken));
+        Assert.True((await api.Variables.CreateVariableEntryAsync(1, new CreateVariableEntryRequest(), Xunit.TestContext.Current.CancellationToken)).IsSuccess);
+    }
+
+    [Fact]
+    public async Task CreateVariableEntryAsync_ExistingKey_IsARefusalTheCallerExplains()
+    {
+        var (api, h) = Create();
+        h.Response = new HttpResponseMessage(HttpStatusCode.BadRequest) { Content = Json(new ApiError { Message = "The key 'A' already exists in this library." }) };
+        var outcome = await api.Variables.CreateVariableEntryAsync(1, new CreateVariableEntryRequest { Key = "A" }, Xunit.TestContext.Current.CancellationToken);
+        Assert.False(outcome.IsSuccess);
+        Assert.Equal(HttpStatusCode.BadRequest, outcome.StatusCode);
     }
 
     [Fact]
@@ -1336,7 +1346,7 @@ public class ApiClientTests
     {
         var (api, h) = Create();
         h.Response = new HttpResponseMessage(HttpStatusCode.OK) { Content = Json(new VariableEntryDto { Id = 1 }) };
-        Assert.NotNull(await api.Variables.UpdateVariableEntryAsync(1, 1, new UpdateVariableEntryRequest(), Xunit.TestContext.Current.CancellationToken));
+        Assert.True((await api.Variables.UpdateVariableEntryAsync(1, 1, new UpdateVariableEntryRequest(), Xunit.TestContext.Current.CancellationToken)).IsSuccess);
     }
 
     [Fact]

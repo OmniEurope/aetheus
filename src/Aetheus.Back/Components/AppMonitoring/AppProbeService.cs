@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: EUPL-1.2
 using System.Diagnostics;
+using Aetheus.Back.Services;
 
 namespace Aetheus.Back.Components.AppMonitoring;
 
@@ -14,9 +15,16 @@ public sealed class AppProbeService(
     IHttpClientFactory httpClientFactory,
     IConfiguration configuration,
     ILogger<AppProbeService> logger,
-    TimeProvider timeProvider) : BackgroundService
+    TimeProvider timeProvider,
+    IPostgresLeaderLease? leaderLease = null) : BackgroundService
 {
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    // Only the live colour runs it (decision of 2026-10-02, PostgresLeaderLease).
+    protected override Task ExecuteAsync(CancellationToken stoppingToken) =>
+        leaderLease is null
+            ? RunLeaderLoopAsync(stoppingToken)
+            : leaderLease.RunAsLeaderAsync("aetheus:app-probe", RunLeaderLoopAsync, stoppingToken);
+
+    private async Task RunLeaderLoopAsync(CancellationToken stoppingToken)
     {
         var enabled = configuration.GetValue("AppMonitoring:BackendProbe:Enabled", true);
         if (!enabled)

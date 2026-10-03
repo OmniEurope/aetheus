@@ -37,10 +37,24 @@ printf '%s' "$password" | LC_ALL=C grep -q '[[:cntrl:]]' && die "password has co
 localpart="${email%@*}"
 
 export DEBIAN_FRONTEND=noninteractive
+# A non-interactive install answers Postfix's debconf question with "No configuration" unless it is
+# preseeded, and a Postfix installed earlier from the Services tab may have been set up that way: no
+# /etc/postfix/main.cf, and the first postconf below died on it ("open /etc/postfix/main.cf for
+# reading: No such file or directory", task 23162, 2026-10-03).
+printf '%s\n' "postfix postfix/main_mailer_type select Internet Site" "postfix postfix/mailname string $hostname" \
+  | debconf-set-selections
 apt-get update -qq || true
 apt-get install -y -qq postfix dovecot-core dovecot-imapd dovecot-pop3d dovecot-lmtpd opendkim opendkim-tools
+if [ ! -f /etc/postfix/main.cf ]; then
+  [ -f /usr/share/postfix/main.cf.debian ] || die "postfix has no main.cf and no packaged default to start from"
+  install -m 644 -o root -g root /usr/share/postfix/main.cf.debian /etc/postfix/main.cf
+fi
+printf '%s\n' "$hostname" > /etc/mailname
 
 # Postfix main.cf (values are validated identifiers; postconf -e takes a single key=value argv token).
+# IPv4 only (user decision of 2026-10-03): receivers such as Gmail refuse mail from an IPv6 address
+# without reverse DNS, and one PTR record, the IPv4 one, is then all the host needs.
+postconf -e "inet_protocols = ipv4"
 postconf -e "myhostname = $hostname"
 postconf -e "mydomain = $domain"
 postconf -e "mydestination = localhost"
@@ -149,7 +163,10 @@ mkdir -p /etc/aetheus
 printf 'managed-by=aetheus\ndomain=%s\n' "$domain" > /etc/aetheus/mail-stack.managed
 chmod 644 /etc/aetheus/mail-stack.managed
 
-# Enable + (re)start services.
+# Enable + (re)start services. A unit masked on the host (postfix was, tasks 23257 and 23258 of
+# 2026-10-03: "Unit file /etc/systemd/system/postfix.service is masked") refuses enable; asking for
+# this stack is asking for these three units, and unmask is a no-op on a unit that is not masked.
+systemctl unmask postfix dovecot opendkim
 systemctl enable postfix dovecot opendkim
 systemctl restart opendkim
 systemctl restart dovecot

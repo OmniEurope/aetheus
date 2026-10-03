@@ -12,13 +12,20 @@ public sealed class ServerTimeoutService(
     IServiceScopeFactory scopeFactory,
     ILogger<ServerTimeoutService> logger,
     IOptions<BackgroundServicesOptions> options,
-    TimeProvider timeProvider) : BackgroundService
+    TimeProvider timeProvider,
+    IPostgresLeaderLease? leaderLease = null) : BackgroundService
 {
     private readonly TimeSpan _checkInterval = options.Value.ServerCheckInterval;
     private readonly TimeSpan _heartbeatTimeout = options.Value.ServerHeartbeatTimeout;
     private readonly TimeProvider _timeProvider = timeProvider;
 
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    // Only the live colour runs it (decision of 2026-10-02, PostgresLeaderLease).
+    protected override Task ExecuteAsync(CancellationToken stoppingToken) =>
+        leaderLease is null
+            ? RunLeaderLoopAsync(stoppingToken)
+            : leaderLease.RunAsLeaderAsync("aetheus:server-timeout", RunLeaderLoopAsync, stoppingToken);
+
+    private async Task RunLeaderLoopAsync(CancellationToken stoppingToken)
     {
         // A backend restart makes every persisted heartbeat look stale until the agents complete
         // their next scheduled POST. Give them one full freshness window before the first sweep;

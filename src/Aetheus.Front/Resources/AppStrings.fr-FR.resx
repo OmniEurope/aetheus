@@ -419,6 +419,7 @@
   <data name="DeleteVariableLibraryConfirm" xml:space="preserve"><value>Êtes-vous sûr de vouloir supprimer cette librairie ?</value></data>
   <data name="Entries" xml:space="preserve"><value>Entrées</value></data>
   <data name="EntryAdded" xml:space="preserve"><value>Entrée ajoutée.</value></data>
+  <data name="LibraryEntryKeyExists" xml:space="preserve"><value>La clé « {0} » existe déjà dans cette librairie.</value></data>
   <data name="EntryUpdated" xml:space="preserve"><value>Entrée mise à jour.</value></data>
   <data name="EntryDeleted" xml:space="preserve"><value>Entrée supprimée.</value></data>
   <data name="DeleteEntryConfirm" xml:space="preserve"><value>Êtes-vous sûr de vouloir supprimer cette entrée ?</value></data>
@@ -1179,7 +1180,6 @@
   <data name="RevertToPreviousConfirm" xml:space="preserve"><value>Remettre le trafic sur la release déployée avant {0} ? L&apos;ancienne couleur tourne encore : rien n&apos;est reconstruit ni migré, et la même action ramène à {0}.</value></data>
   <data name="RedeployUnavailable" xml:space="preserve"><value>Non redéployable d&apos;ici : pas de contrat d&apos;assurance scellé, pas d&apos;artefacts retenus, ou aucun pipeline de déploiement qui prend une version candidate.</value></data>
   <data name="PreflightRecordTitle" xml:space="preserve"><value>Vérifié avant le démarrage de ce run</value></data>
-  <data name="PreflightRecordHint" xml:space="preserve"><value>Ce que le préflight de lancement a contrôlé. Une exigence qu&apos;il refuse arrête le lancement, donc aucun run n&apos;est créé.</value></data>
   <data name="RunWaitingTitle" xml:space="preserve"><value>Ce run attend</value></data>
   <data name="RunWaitingSince" xml:space="preserve"><value>depuis</value></data>
   <data name="TaskQueuePositionLive" xml:space="preserve"><value>En attente sur {0} · position {1} sur {2} dans la file (temps réel).</value></data>
@@ -2936,7 +2936,7 @@
   <data name="CoverageTierGood" xml:space="preserve"><value>bonne (80 % ou plus)</value></data>
   <data name="CoverageTierFair" xml:space="preserve"><value>moyenne (de 50 à 80 %)</value></data>
   <data name="CoverageTierLow" xml:space="preserve"><value>faible (moins de 50 %)</value></data>
-  <data name="StepUsualDuration" xml:space="preserve"><value>moy. {0}</value></data>
+  <data name="StepUsualDuration" xml:space="preserve"><value>(moyenne {0})</value></data>
   <data name="StepUsualDurationHint" xml:space="preserve"><value>Durée moyenne de cette étape sur les dernières exécutions réussies</value></data>
   <data name="Supervision" xml:space="preserve"><value>Supervision</value><comment>same in both languages</comment></data>
   <data name="SupervisionDescription" xml:space="preserve"><value>Toutes les applications supervisées, tous projets confondus : leur statut, les personnes en ligne et le dernier événement reçu.</value></data>
@@ -3370,4 +3370,34 @@
   <data name="Unassigned" xml:space="preserve"><value>Non rattaché</value></data>
   <data name="RequiredField" xml:space="preserve"><value>Ce champ est obligatoire.</value></data>
   <data name="All" xml:space="preserve"><value>Tous</value></data>
+  <data name="MailSetupSteps" xml:space="preserve"><value>Étapes de la configuration</value></data>
+  <data name="MailSetupStepServer" xml:space="preserve"><value>Serveur et domaine</value></data>
+  <data name="MailSetupStepAdmin" xml:space="preserve"><value>Compte d&apos;administration</value></data>
+  <data name="MailSetupStepOptions" xml:space="preserve"><value>Options</value><comment>same in both languages</comment></data>
+  <data name="MailHostnameHelp" xml:space="preserve"><value>Le nom complet de ce serveur de messagerie, par exemple mx.votredomaine.fr. Il sert de nom au serveur, de cible à l&apos;enregistrement MX et de nom au certificat. Créez un enregistrement A de ce nom vers l&apos;adresse IP du serveur, et le DNS inverse (PTR) de cette adresse vers ce nom.</value></data>
+  <data name="MailDomainHelp" xml:space="preserve"><value>Le domaine des adresses servies : ce qui suit le @, par exemple votredomaine.fr. L&apos;installation ne modifie pas le DNS ; les enregistrements à publier s&apos;affichent ensuite.</value></data>
+  <data name="MailDkimSelectorHelp" xml:space="preserve"><value>Une étiquette libre (lettres, chiffres, - et _) qui nomme la clé de signature DKIM dans le DNS : l&apos;enregistrement sera sélecteur._domainkey.domaine. Prenez-en une différente de celles d&apos;un autre fournisseur du même domaine.</value></data>
+  <data name="MailAdminEmailHelp" xml:space="preserve"><value>La première boîte créée, dans le domaine ci-dessus, par exemple postmaster@votredomaine.fr. Elle reçoit aussi les rapports DMARC.</value></data>
+  <data name="MailAdminPasswordHelp" xml:space="preserve"><value>Le mot de passe de cette boîte, au moins 12 caractères.</value></data>
+  <data name="MailQuotaHelp" xml:space="preserve"><value>La taille maximale de chaque boîte, en mégaoctets.</value></data>
+  <data name="MailHostnameInvalid" xml:space="preserve"><value>Indiquez un nom complet, avec un point et une extension, par exemple mx.votredomaine.fr.</value></data>
+  <data name="MailDkimSelectorInvalid" xml:space="preserve"><value>Le sélecteur ne peut contenir que des lettres, des chiffres, - et _.</value></data>
+  <data name="MailDomainInvalid" xml:space="preserve"><value>Indiquez un domaine valide, par exemple votredomaine.fr.</value></data>
+  <data name="MailEmailInvalid" xml:space="preserve"><value>Indiquez une adresse e-mail valide.</value></data>
+  <data name="MailPasswordInvalid" xml:space="preserve"><value>Le mot de passe doit faire au moins 12 caractères.</value></data>
+  <data name="ApprovalAddComment" xml:space="preserve"><value>Commenter</value></data>
+  <data name="ServiceActionRunningBanner" xml:space="preserve"><value>{0} de « {1} » en cours…</value></data>
+  <data name="ServiceActionQueuedBanner" xml:space="preserve"><value>{0} de « {1} » : en attente de l&apos;agent…</value></data>
+  <data name="ServiceActionNounInstall" xml:space="preserve"><value>Installation</value><comment>same in both languages</comment></data>
+  <data name="ServiceActionNounUninstall" xml:space="preserve"><value>Désinstallation</value></data>
+  <data name="ServiceActionNounStart" xml:space="preserve"><value>Démarrage</value></data>
+  <data name="ServiceActionNounStop" xml:space="preserve"><value>Arrêt</value></data>
+  <data name="ServiceActionNounRestart" xml:space="preserve"><value>Redémarrage</value></data>
+  <data name="MailNotConfigured" xml:space="preserve"><value>Messagerie non configurée</value></data>
+  <data name="MailNotConfiguredTitle" xml:space="preserve"><value>La messagerie n&apos;est pas encore configurée sur ce serveur</value></data>
+  <data name="MailSetupAction" xml:space="preserve"><value>Configurer</value></data>
+  <data name="MailGuideServicesNotEnough" xml:space="preserve"><value>Postfix ou Dovecot installés seuls depuis l&apos;onglet Services ne suffisent pas : les boîtes, la signature DKIM et le chiffrement se posent par « Configurer ».</value></data>
+  <data name="MailGuidePrerequisites" xml:space="preserve"><value>Avant : choisissez un nom complet pour ce serveur (par exemple mx.votredomaine.fr), créez son enregistrement A vers l&apos;adresse IP du serveur et le DNS inverse (PTR) de cette adresse vers ce nom, et vérifiez auprès de l&apos;hébergeur que le port 25 sortant est ouvert.</value></data>
+  <data name="MailGuideRunSetup" xml:space="preserve"><value>Puis « Configurer » : nom du serveur, domaine, sélecteur DKIM, puis la boîte d&apos;administration ; chaque champ explique ce qu&apos;il attend.</value></data>
+  <data name="MailGuideAfterSetup" xml:space="preserve"><value>Après : obtenez le certificat, testez l&apos;envoi et la réception, publiez SPF, DKIM et DMARC (onglet Diagnostics), et faites pointer l&apos;enregistrement MX vers ce serveur en dernier.</value></data>
 </root>

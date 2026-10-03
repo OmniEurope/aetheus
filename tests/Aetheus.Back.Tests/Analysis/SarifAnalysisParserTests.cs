@@ -122,6 +122,31 @@ public sealed class SarifAnalysisParserTests
     }
 
     [Fact]
+    public void R2055_TwoHistoryLeaksOfOneAuthor_AreTwoFindings()
+    {
+        // gitleaks `git` mode fills author, email, date and commit message: read first in key order,
+        // `author` made every leak of one author a single finding.
+        var monaco = GitleaksHistory("aaaa1111", "generic-api-key has detected secret for file Prometheus.Front/wwwroot/lib/editor.main.js.");
+        var token = GitleaksHistory("bbbb2222", "generic-api-key has detected secret for file Prometheus.Agent.Linux/appsettings.json.");
+
+        var first = Assert.Single(SarifAnalysisParser.Parse(monaco, AnalysisCategory.Secrets));
+        var second = Assert.Single(SarifAnalysisParser.Parse(token, AnalysisCategory.Secrets));
+
+        Assert.NotEqual(first.Fingerprint, second.Fingerprint);
+    }
+
+    [Fact]
+    public void R2055_TheSameHistoryLeak_KeepsItsFingerprint_WhenOnlyTheProvenanceChanges()
+    {
+        var reported = GitleaksHistory("aaaa1111", "generic-api-key has detected secret for file app.env.", author: "First Name");
+        var renamedAuthor = GitleaksHistory("aaaa1111", "generic-api-key has detected secret for file app.env.", author: "Other Name");
+
+        Assert.Equal(
+            Assert.Single(SarifAnalysisParser.Parse(reported, AnalysisCategory.Secrets)).Fingerprint,
+            Assert.Single(SarifAnalysisParser.Parse(renamedAuthor, AnalysisCategory.Secrets)).Fingerprint);
+    }
+
+    [Fact]
     public void Parse_MalformedSarifFailsClosed()
     {
         var exception = Assert.Throws<BadRequestException>(() =>
@@ -129,6 +154,15 @@ public sealed class SarifAnalysisParserTests
 
         Assert.Contains("Invalid SARIF", exception.Message, StringComparison.Ordinal);
     }
+
+    private static string GitleaksHistory(string commit, string message, string author = "Same Author") => $$"""
+        { "runs": [{ "tool": { "driver": { "name": "gitleaks" } }, "results": [{
+          "ruleId": "generic-api-key",
+          "message": { "text": "{{message}}" },
+          "partialFingerprints": { "commitSha": "{{commit}}", "email": "dev@example.test", "author": "{{author}}", "date": "2026-04-05T09:03:12Z", "commitMessage": "a commit" },
+          "locations": [{ "physicalLocation": { "artifactLocation": { "uri": "app.env" }, "region": { "startLine": 3 } } }]
+        }] }] }
+        """;
 
     private static string Sarif(int line, string path = "src/app.ts") => $$"""
         { "runs": [{ "tool": { "driver": { "name": "ESLint" } }, "results": [{

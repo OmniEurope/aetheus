@@ -13,7 +13,8 @@ public sealed class TaskTimeoutService(
     ILogger<TaskTimeoutService> logger,
     IOptions<BackgroundServicesOptions> options,
     IHubContext<ServerHub> serverHub,
-    TimeProvider timeProvider) : BackgroundService
+    TimeProvider timeProvider,
+    IPostgresLeaderLease? leaderLease = null) : BackgroundService
 {
     private readonly TimeSpan _checkInterval = options.Value.TaskCheckInterval;
     private readonly TimeSpan _startupDelay = options.Value.TaskStartupDelay;
@@ -24,7 +25,13 @@ public sealed class TaskTimeoutService(
     private readonly TimeSpan _offlineAgentGrace = options.Value.OfflineAgentGrace;
 
 
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    // Only the live colour runs it (decision of 2026-10-02, PostgresLeaderLease).
+    protected override Task ExecuteAsync(CancellationToken stoppingToken) =>
+        leaderLease is null
+            ? RunLeaderLoopAsync(stoppingToken)
+            : leaderLease.RunAsLeaderAsync("aetheus:task-timeout", RunLeaderLoopAsync, stoppingToken);
+
+    private async Task RunLeaderLoopAsync(CancellationToken stoppingToken)
     {
         if (_startupDelay > TimeSpan.Zero)
             await Task.Delay(_startupDelay, timeProvider, stoppingToken).ConfigureAwait(false);

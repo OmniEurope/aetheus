@@ -274,6 +274,33 @@ public class VariableLibraryServiceTests
     }
 
     [Fact]
+    public async Task CreateEntryAsync_KeyAlreadyInTheLibrary_IsRefusedWithItsReason()
+    {
+        _repoMock.FindLibraryAsync(1, Arg.Any<CancellationToken>()).Returns(new VariableLibrary { Id = 1, Name = "Lib" });
+        _repoMock.EntryKeyExistsAsync(1, "DB_HOST", null, Arg.Any<CancellationToken>()).Returns(true);
+
+        var refused = await Assert.ThrowsAsync<BadRequestException>(() =>
+            _sut.CreateEntryAsync(1, new CreateVariableEntryRequest { Key = "DB_HOST", Value = "x" }, ct: TestContext.Current.CancellationToken));
+
+        Assert.Contains("DB_HOST", refused.Message, StringComparison.Ordinal);
+        await _repoMock.DidNotReceive().AddEntryAsync(Arg.Any<VariableLibraryEntry>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task UpdateEntryAsync_RenamedToAnotherEntrysKey_IsRefused()
+    {
+        var entry = new VariableLibraryEntry { Id = 10, VariableLibraryId = 1, Key = "OLD", Value = "old" };
+        _repoMock.FindEntryAsync(10, Arg.Any<CancellationToken>()).Returns(entry);
+        _repoMock.EntryKeyExistsAsync(1, "TAKEN", 10, Arg.Any<CancellationToken>()).Returns(true);
+
+        await Assert.ThrowsAsync<BadRequestException>(() =>
+            _sut.UpdateEntryAsync(1, 10, new UpdateVariableEntryRequest { Key = "TAKEN", Value = "v" }, ct: TestContext.Current.CancellationToken));
+
+        Assert.Equal("OLD", entry.Key);
+        await _repoMock.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task UpdateEntryAsync_Found_UpdatesAndCreatesVersion()
     {
         var entry = new VariableLibraryEntry { Id = 10, VariableLibraryId = 1, Key = "OLD", Value = "old" };

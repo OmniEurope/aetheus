@@ -31,7 +31,7 @@
            included (the two date pickers above the grid are gone). *@
         <OmniDataGridColumn Frozen="true" TItem="AuditLogDto" Property="Timestamp" Title="@L["Timestamp"]" Width="180px" Filterable="true" FilterType="OmniDataGridColumnFilterType.DateRange" FilterIncludesTime="true" >
             <Template Context="log">
-                <span title="@log.Timestamp.ToString("yyyy-MM-dd HH:mm:ss")">@RelativeTime.FormatAgo(L, log.Timestamp)</span>
+                <span title="@log.Timestamp.ToString("F")">@RelativeTime.FormatAgo(L, log.Timestamp)</span>
             </Template>
         </OmniDataGridColumn>
         <OmniDataGridColumn TItem="AuditLogDto" Property="Username" Title="@L["User"]" Width="140px" Filterable="true" />

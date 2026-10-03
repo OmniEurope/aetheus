@@ -153,6 +153,20 @@ public partial class Servers : IAsyncDisposable
         await StartHubAsync();
     }
 
+    /// <summary>Recette R2-056: an agent update changes the compatibility count and the row's badge.</summary>
+    private async Task RefreshAfterAgentUpdateAsync()
+    {
+        try
+        {
+            _compatibilitySummary = await Api.Servers.GetAgentCompatibilitySummaryAsync();
+        }
+        catch (HttpRequestException)
+        {
+            // The count stays as it was; the grid reload below still refreshes each row.
+        }
+        await InvalidateAndReloadGridAsync();
+    }
+
     private void OnPermissionsChanged()
     {
         RefreshCanWrite();
@@ -174,6 +188,9 @@ public partial class Servers : IAsyncDisposable
             _hubConnection.On<ServerDto>("ServerUpdated", _ => InvokeAsync(InvalidateAndReloadGridAsync));
             _hubConnection.On<int>("ServerRemoved", _ => InvokeAsync(InvalidateAndReloadGridAsync));
             _hubConnection.On<int>("ServerOffline", _ => InvokeAsync(InvalidateAndReloadGridAsync));
+            // Recette R2-056: "Update recommended: 1" was read once at load and stayed after the update.
+            _hubConnection.On<int, int>("AgentUpdateConfirmed", (_, _) => InvokeAsync(RefreshAfterAgentUpdateAsync));
+            _hubConnection.On<int, int>("AgentUpdateFailed", (_, _) => InvokeAsync(RefreshAfterAgentUpdateAsync));
             _hubConnection.On<int, ServerHeartbeatDto>("ServerHeartbeat", (id, heartbeat) => InvokeAsync(() => OnHeartbeatAsync(id, heartbeat)));
             // Group membership is per-connection and lost on auto-reconnect - re-join + reload to
             // catch broadcasts missed while disconnected (e.g. a server enrolled during a blip).

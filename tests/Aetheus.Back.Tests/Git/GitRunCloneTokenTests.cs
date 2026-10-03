@@ -24,6 +24,35 @@ public class GitRunCloneTokenTests
         Assert.Equal(39, GitRunCloneToken.Validate(config, user, pass, projectId: 1, Now));
     }
 
+    // Recette R-464: during a blue-green switch to a dedicated RunTokenKey, the colour that has it must
+    // still accept the clone tokens the other colour minted under the Auth:EncryptionKey fallback.
+    [Fact]
+    public void Validate_accepts_a_token_minted_under_the_fallback_key_once_a_dedicated_key_is_configured()
+    {
+        var oldColour = Config("unit-test-encryption-key-32chars!");
+        var newColour = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Auth:EncryptionKey"] = "unit-test-encryption-key-32chars!",
+                ["GitLight:RunTokenKey"] = "dedicated-run-token-key-32-chars!!"
+            })
+            .Build();
+        var (oldUser, oldPass) = GitRunCloneToken.Mint(oldColour, runId: 39, projectId: 1, Now, GitRunCloneToken.DefaultTtl);
+        var (newUser, newPass) = GitRunCloneToken.Mint(newColour, runId: 40, projectId: 1, Now, GitRunCloneToken.DefaultTtl);
+
+        Assert.Equal(39, GitRunCloneToken.Validate(newColour, oldUser, oldPass, projectId: 1, Now));
+        Assert.Equal(40, GitRunCloneToken.Validate(newColour, newUser, newPass, projectId: 1, Now));
+        Assert.Null(GitRunCloneToken.Validate(Config("another-secret-entirely-32-chars!"), newUser, newPass, projectId: 1, Now));
+    }
+
+    [Fact]
+    public void Validate_rejects_every_token_when_no_secret_is_configured()
+    {
+        var (user, pass) = GitRunCloneToken.Mint(Config(), runId: 39, projectId: 1, Now, GitRunCloneToken.DefaultTtl);
+
+        Assert.Null(GitRunCloneToken.Validate(new ConfigurationBuilder().Build(), user, pass, projectId: 1, Now));
+    }
+
     [Fact]
     public void Validate_rejects_a_different_project()
     {

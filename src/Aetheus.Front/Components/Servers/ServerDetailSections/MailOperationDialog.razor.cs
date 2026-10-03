@@ -68,6 +68,57 @@ public partial class MailOperationDialog
             _checkingMx = false;
         }
     }
+    /// <summary>Recette R2-060: the fields each setup step owns. Next used to move on whatever was typed,
+    /// so a bare host name or an address outside the domain only failed at the very end.</summary>
+    internal static readonly IReadOnlyDictionary<int, string[]> SetupStepMembers = new Dictionary<int, string[]>
+    {
+        [1] = [nameof(MailDialogModel.Hostname), nameof(MailDialogModel.Domain), nameof(MailDialogModel.DkimSelector)],
+        [2] = [nameof(MailDialogModel.Email), nameof(MailDialogModel.Password)]
+    };
+
+    private IReadOnlyList<string> _stepErrors = [];
+
+    /// <summary>The model's own validation, kept to the members of one step and translated.</summary>
+    internal IReadOnlyList<string> StepErrors(int step)
+    {
+        if (!SetupStepMembers.TryGetValue(step, out var members)) return [];
+        var results = new List<ValidationResult>();
+        // Attribute checks first; the model's rules run only when they pass (as EditContext does), so
+        // both are read here.
+        Validator.TryValidateObject(_model, new ValidationContext(_model), results, validateAllProperties: true);
+        results.AddRange(_model.Validate(new ValidationContext(_model)));
+        return [.. results
+            .Where(result => result.MemberNames.Any(members.Contains))
+            .Select(result => L[result.ErrorMessage ?? "Required"].Value)
+            .Distinct(StringComparer.Ordinal)];
+    }
+
+    private void NextStep()
+    {
+        _stepErrors = StepErrors(_setupStep);
+        if (_stepErrors.Count == 0) _setupStep++;
+    }
+
+    private void PreviousStep()
+    {
+        _stepErrors = [];
+        _setupStep--;
+    }
+
+    /// <summary>The step list moves back freely; forward only past steps that validate.</summary>
+    private Task<bool> CanMoveToStepAsync(int index)
+    {
+        for (var step = _setupStep; step < index + 1; step++)
+        {
+            _stepErrors = StepErrors(step);
+            if (_stepErrors.Count > 0) return Task.FromResult(false);
+        }
+        _stepErrors = [];
+        return Task.FromResult(true);
+    }
+
+    private void OnStepSelected(int index) => _setupStep = index + 1;
+
     private sealed record DnsRecord(string Label, string Value, bool Multiline);
 }
 
@@ -116,8 +167,15 @@ public sealed class MailDialogModel : IValidatableObject
             if (string.IsNullOrWhiteSpace(Domain))
                 yield return new ValidationResult("Required", [nameof(Domain)]);
             else if (!DomainValidator.IsValid(Domain))
-                yield return new ValidationResult("Invalid domain", [nameof(Domain)]);
+                yield return new ValidationResult("MailDomainInvalid", [nameof(Domain)]);
+            // Recette R2-060: the helper refuses a selector it cannot put in a DNS name (mail-setup).
+            if (!MailValidation.IsValidDkimSelector(DkimSelector))
+                yield return new ValidationResult("MailDkimSelectorInvalid", [nameof(DkimSelector)]);
         }
+        // Recette R2-060: mail-setup takes a full name only (a dot and an extension); a bare host name was
+        // refused by the agent after the whole wizard.
+        if (Mode == MailDialogMode.Setup && !DomainValidator.IsValid(Hostname))
+            yield return new ValidationResult("MailHostnameInvalid", [nameof(Hostname)]);
     }
 
     private IEnumerable<ValidationResult> ValidateAccount()
@@ -129,9 +187,9 @@ public sealed class MailDialogModel : IValidatableObject
             else
             {
                 if (!EmailValidator.IsValid(Email))
-                    yield return new ValidationResult("Invalid email", [nameof(Email)]);
+                    yield return new ValidationResult("MailEmailInvalid", [nameof(Email)]);
                 if (!MailValidation.IsValidPassword(Password))
-                    yield return new ValidationResult("Invalid password", [nameof(Password)]);
+                    yield return new ValidationResult("MailPasswordInvalid", [nameof(Password)]);
             }
         }
     }
@@ -139,7 +197,7 @@ public sealed class MailDialogModel : IValidatableObject
     private IEnumerable<ValidationResult> ValidateStackOperations() => Mode switch
     {
         MailDialogMode.RequestCertificate => EmailValidator.IsValid(Email)
-            ? [] : [new ValidationResult("Invalid email", [nameof(Email)])],
+            ? [] : [new ValidationResult("MailEmailInvalid", [nameof(Email)])],
         MailDialogMode.SpamThresholds => MailValidation.AreSpamThresholdsOrdered(GreylistScore, AddHeaderScore, RejectScore)
             ? [] : [new ValidationResult("MailSpamThresholdsInvalid", [nameof(RejectScore)])],
         MailDialogMode.LearnSpam => string.IsNullOrWhiteSpace(RawMessage)
@@ -152,9 +210,9 @@ public sealed class MailDialogModel : IValidatableObject
     private IEnumerable<ValidationResult> ValidateTestDelivery()
     {
         if (string.IsNullOrWhiteSpace(Source) || !EmailValidator.IsValid(Source))
-            yield return new ValidationResult("Invalid email", [nameof(Source)]);
+            yield return new ValidationResult("MailEmailInvalid", [nameof(Source)]);
         if (string.IsNullOrWhiteSpace(Destination) || !EmailValidator.IsValid(Destination))
-            yield return new ValidationResult("Invalid email", [nameof(Destination)]);
+            yield return new ValidationResult("MailEmailInvalid", [nameof(Destination)]);
     }
 
     // The setup helper creates the admin mailbox inside the configured domain.
@@ -174,9 +232,9 @@ public sealed class MailDialogModel : IValidatableObject
             else
             {
                 if (!EmailValidator.IsValid(Source))
-                    yield return new ValidationResult("Invalid source email", [nameof(Source)]);
+                    yield return new ValidationResult("MailEmailInvalid", [nameof(Source)]);
                 if (!EmailValidator.IsValid(Destination))
-                    yield return new ValidationResult("Invalid destination email", [nameof(Destination)]);
+                    yield return new ValidationResult("MailEmailInvalid", [nameof(Destination)]);
             }
         }
     }

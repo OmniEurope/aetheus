@@ -47,6 +47,33 @@ public class PipelineRunTests : BunitContext
     }
 
     [Fact]
+    public void R2_045_AWaitingRun_ReadsItsApprovalBeforeTheRestOfThePage()
+    {
+        // The banner used to arrive after the first render and push the page down: its approval is
+        // now read before the page shows, ahead of everything the page loads behind it.
+        _handler.SetJsonResponse("api/pipelines/runs/78", new PipelineRunDto
+        {
+            Id = 78,
+            PipelineId = 5,
+            PipelineName = "Deliver",
+            Status = PipelineStatus.WaitingForApproval
+        });
+        _handler.SetJsonResponse("api/pipelines/runs/78/approvals", new List<PipelineApprovalDto>
+        {
+            new() { Id = 31, PipelineRunId = 78, StageName = "Confirm", Scope = ApprovalScope.Pipeline, Status = ApprovalStatus.Pending }
+        });
+
+        var cut = Render<PipelineRun>(parameters => parameters.Add(component => component.RunId, 78));
+
+        cut.WaitForState(() => cut.Markup.Contains("ApprovalRequiredTitle"), TimeSpan.FromSeconds(2));
+        var urls = _handler.Requests.Select(request => request.Url).ToList();
+        var approvals = urls.FindIndex(url => url.Contains("runs/78/approvals", StringComparison.Ordinal));
+        var releases = urls.FindIndex(url => url.Contains("releases/by-run/78", StringComparison.Ordinal));
+        Assert.InRange(approvals, 0, int.MaxValue);
+        Assert.InRange(releases, approvals + 1, int.MaxValue);
+    }
+
+    [Fact]
     public void Renders_RunDetails()
     {
         _handler.SetJsonResponse("api/pipelines/runs/1", new PipelineRunDto
@@ -193,9 +220,9 @@ public class PipelineRunTests : BunitContext
         // and the finding rows prove the tile opened the Gate tab.
         cut.WaitForState(() => cut.Markup.Contains("analysis-run-gate-page", StringComparison.Ordinal));
         Assert.Contains("/analysis/findings/17", cut.Markup);
-        Assert.Equal("Untrusted input reaches a command sink.", cut.Find(".analysis-finding-grid-message").TextContent);
-        Assert.Equal("src/Runner.cs", cut.Find(".analysis-finding-location code").TextContent);
-        Assert.Contains("Line 42", cut.Find(".analysis-finding-location").TextContent);
+        // Recette R2-053: title and location on one line each, path:line, the message on hover.
+        Assert.EndsWith("Untrusted input reaches a command sink.", cut.Find(".analysis-finding-grid-title").GetAttribute("title"), StringComparison.Ordinal);
+        Assert.Equal("src/Runner.cs:42", cut.Find(".analysis-finding-location").TextContent);
     }
 
     [Fact]

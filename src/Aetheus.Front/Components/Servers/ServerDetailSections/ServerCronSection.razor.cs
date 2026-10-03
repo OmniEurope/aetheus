@@ -30,7 +30,7 @@ public partial class ServerCronSection : ServerActionSectionBase
             // rejected at save (CronValidation.IsValidScheduleSyntax), so the preview must mirror that.
             var cron = CronExpression.Parse(expression, CronFormat.Standard);
             var next = cron.GetNextOccurrence(DateTime.UtcNow);
-            return (true, next?.ToLocalTime().ToString("yyyy-MM-dd HH:mm"), null);
+            return (true, next?.ToLocalTime().ToString("g"), null);
         }
         catch (CronFormatException ex)
         {

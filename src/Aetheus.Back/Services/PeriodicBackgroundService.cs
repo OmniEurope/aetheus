@@ -2,9 +2,21 @@
 
 namespace Aetheus.Back.Services;
 
-public abstract class PeriodicBackgroundService(TimeSpan interval) : BackgroundService
+/// <summary>
+/// A periodic background worker. With a lease name it runs only in the leader instance, which is the
+/// live blue-green colour (decision of 2026-10-02, <see cref="PostgresLeaderLease"/>).
+/// </summary>
+public abstract class PeriodicBackgroundService(
+    TimeSpan interval,
+    IPostgresLeaderLease? leaderLease = null,
+    string? leaseName = null) : BackgroundService
 {
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    protected override Task ExecuteAsync(CancellationToken stoppingToken) =>
+        leaderLease is null || string.IsNullOrWhiteSpace(leaseName)
+            ? RunLoopAsync(stoppingToken)
+            : leaderLease.RunAsLeaderAsync(leaseName, RunLoopAsync, stoppingToken);
+
+    private async Task RunLoopAsync(CancellationToken stoppingToken)
     {
         using var timer = new PeriodicTimer(interval);
         while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false))

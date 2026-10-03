@@ -267,6 +267,16 @@ internal sealed class AppAnalyticsRejectionConfiguration : IEntityTypeConfigurat
     }
 }
 
+internal sealed class AppAnalyticsIngestVolumeConfiguration : IEntityTypeConfiguration<AppAnalyticsIngestVolume>
+{
+    public void Configure(EntityTypeBuilder<AppAnalyticsIngestVolume> builder)
+    {
+        builder.HasIndex(e => new { e.MonitoredAppId, e.ReceivedAtUtc });
+        builder.HasIndex(e => e.ReceivedAtUtc);
+        builder.HasMonitoredAppCascade(e => e.MonitoredApp, e => e.MonitoredAppId);
+    }
+}
+
 internal sealed class AppVisitorIdentityConfiguration : IEntityTypeConfiguration<AppVisitorIdentity>
 {
     public void Configure(EntityTypeBuilder<AppVisitorIdentity> builder)

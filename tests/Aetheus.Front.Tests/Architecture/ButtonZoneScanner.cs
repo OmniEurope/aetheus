@@ -1,24 +1,37 @@
+// kit-model ButtonZoneScanner 1
 // SPDX-License-Identifier: EUPL-1.2
+//
+// Razor zone reader behind the STD-BTN guard "at most one blue button per zone" (docs/code-rules.md).
+// Copy it into a test project next to ButtonConventionGuardTests.cs and adapt only the namespace;
+// keep the kit-model line so verify-rules.ps1 (STD-KITCOPY) reports the copy when this model moves.
+//
+// Aetheus copy: the model reads the button of the kit's example app, from a component library Aetheus
+// no longer uses. Aetheus renders OE buttons, so the three button-library points are adapted: the
+// button tags (OmniButton and OmniSplitButton), the colour attribute (Variant) and the default colour
+// in IsMain (an OmniButton defaults to Primary, an OmniSplitButton to Secondary). The branch test of
+// Buttons is moved into StartsBranch, unchanged, to keep Buttons under the cyclomatic budget of
+// ComplexityAnalyzerTests (25; the model's Buttons is at 26).
+
 using System.Text.RegularExpressions;
 
 namespace Aetheus.Front.Tests.Architecture;
 
 /// <summary>
-/// Reads a <c>.razor</c> file as markup for the STD-BTN zone rule: every <c>OmniButton</c> and
-/// <c>OmniSplitButton</c> with the element that directly holds it (its zone: a header's actions, a
-/// dialog footer, a toolbar, one grid row's actions...) and the <c>if</c>/<c>else</c> branches around
-/// it, since two buttons in different branches of one <c>if</c> never render together.
+/// Reads a <c>.razor</c> source as markup for the <c>STD-BTN</c> zone rule (docs/code-rules.md): every
+/// button with the element that directly holds it (its zone: a header's actions, a dialog footer, a
+/// form's submit row, a toolbar...) and the <c>if</c>/<c>else</c> branches around it, since two buttons
+/// in different branches of one <c>if</c> never render together.
 /// </summary>
 internal static class ButtonZoneScanner
 {
-    /// <param name="Ancestors">The names of the elements around the button, innermost first.</param>
-    internal sealed record ZoneButton(
-        string Name, string Tag, int Line, int Zone, IReadOnlyList<(int If, int Branch)> Branches,
-        IReadOnlyList<string> Ancestors);
+    /// <summary>The button tags of this app: OE's button and split button.</summary>
+    private static readonly HashSet<string> ButtonTags = new(StringComparer.Ordinal) { "OmniButton", "OmniSplitButton" };
+
+    internal sealed record ZoneButton(string Markup, int Line, int Zone, IReadOnlyList<(int If, int Branch)> Branches);
 
     private static readonly HashSet<string> VoidElements = new(StringComparer.OrdinalIgnoreCase)
     {
-        "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr"
+        "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr",
     };
 
     private static readonly Regex Comment = new(@"@\*.*?\*@", RegexOptions.Singleline | RegexOptions.CultureInvariant);
@@ -29,6 +42,9 @@ internal static class ButtonZoneScanner
 
     private static readonly Regex Branch = new(
         @"\G(?:@?else\s+if\s*\(|@?if\s*\(|@?else\s*\{)", RegexOptions.CultureInvariant);
+
+    private static readonly Regex StyleAttr = new(
+        @"^<\w+\b(?:""[^""]*""|[^>""])*?\bVariant\s*=\s*""(?<v>[^""]*)""", RegexOptions.CultureInvariant);
 
     /// <summary>The buttons of <paramref name="source"/>, in document order.</summary>
     internal static List<ZoneButton> Buttons(string source)
@@ -48,26 +64,49 @@ internal static class ButtonZoneScanner
             if (c == '<')
             {
                 var tag = Tag.Match(source, i);
-                if (!tag.Success) { i++; continue; }
+                if (!tag.Success)
+                {
+                    i++;
+                    continue;
+                }
+
                 var name = tag.Groups["name"].Value;
                 var selfClosing = tag.Groups["attrs"].Value.TrimEnd().EndsWith('/');
                 if (tag.Groups["close"].Success)
                 {
                     if (elements.Any(e => e.Name == name))
-                        while (elements.Pop().Name != name) { }
+                    {
+                        while (elements.Pop().Name != name)
+                        {
+                        }
+                    }
+
                     i += tag.Length;
                     continue;
                 }
 
-                if (name is "OmniButton" or "OmniSplitButton")
+                if (ButtonTags.Contains(name))
                 {
-                    var button = ReadButton(source, i, tag.Length, name, selfClosing, elements, frames);
-                    result.Add(button.Button);
-                    i = button.End;
+                    var end = i + tag.Length;
+                    if (!selfClosing)
+                    {
+                        var close = source.IndexOf($"</{name}>", end, StringComparison.Ordinal);
+                        end = close < 0 ? end : close + name.Length + 3;
+                    }
+
+                    var line = source.AsSpan(0, i).Count('\n') + 1;
+                    result.Add(new ZoneButton(source[i..end], line,
+                        elements.Count > 0 ? elements.Peek().Id : 0,
+                        frames.Where(f => f.If >= 0).ToList()));
+                    i = end;
                     continue;
                 }
 
-                if (!selfClosing && !VoidElements.Contains(name)) elements.Push((name, nextElement++));
+                if (!selfClosing && !VoidElements.Contains(name))
+                {
+                    elements.Push((name, nextElement++));
+                }
+
                 i += tag.Length;
                 continue;
             }
@@ -75,9 +114,14 @@ internal static class ButtonZoneScanner
             if (StartsBranch(source, i, out var branch))
             {
                 var open = source.IndexOf('{', i);
-                if (open < 0) break;
+                if (open < 0)
+                {
+                    break;
+                }
+
                 var isElse = branch.Value.Contains("else", StringComparison.Ordinal);
-                var frame = isElse && lastClosed.TryGetValue(frames.Count, out var previous)
+                var depth = frames.Count;
+                var frame = isElse && lastClosed.TryGetValue(depth, out var previous)
                     ? (previous.If, previous.Branch + 1)
                     : (nextIf++, 0);
                 frames.Push(frame);
@@ -85,43 +129,32 @@ internal static class ButtonZoneScanner
                 continue;
             }
 
-            if (c == '{') frames.Push((-1, 0));
+            if (c == '{')
+            {
+                frames.Push((-1, 0));
+            }
             else if (c == '}' && frames.Count > 0)
             {
                 var closed = frames.Pop();
-                if (closed.If >= 0) lastClosed[frames.Count] = closed;
+                if (closed.If >= 0)
+                {
+                    lastClosed[frames.Count] = closed;
+                }
             }
+
             i++;
         }
-        return result;
-    }
 
-    /// <summary>The button whose opening tag starts at <paramref name="start"/>, up to its closing tag.</summary>
-    private static (ZoneButton Button, int End) ReadButton(
-        string source, int start, int tagLength, string name, bool selfClosing,
-        Stack<(string Name, int Id)> elements, Stack<(int If, int Branch)> frames)
-    {
-        var end = start + tagLength;
-        if (!selfClosing)
-        {
-            var close = source.IndexOf($"</{name}>", end, StringComparison.Ordinal);
-            end = close < 0 ? end : close + name.Length + 3;
-        }
-        var line = source.AsSpan(0, start).Count('\n') + 1;
-        var button = new ZoneButton(name, source[start..end], line,
-            elements.Count > 0 ? elements.Peek().Id : 0,
-            frames.Where(f => f.If >= 0).ToList(),
-            elements.Select(e => e.Name).ToList());
-        return (button, end);
+        return result;
     }
 
     /// <summary>True when an <c>if</c>, <c>else if</c> or <c>else</c> block starts at <paramref name="i"/>.</summary>
     private static bool StartsBranch(string source, int i, out Match branch)
     {
-        branch = Match.Empty;
         var c = source[i];
-        if (c is not ('@' or 'i' or 'e') || (i > 0 && char.IsLetterOrDigit(source[i - 1]))) return false;
-        branch = Branch.Match(source, i);
+        branch = (c == '@' || c == 'i' || c == 'e') && (i == 0 || !char.IsLetterOrDigit(source[i - 1]))
+            ? Branch.Match(source, i)
+            : Match.Empty;
         return branch.Success;
     }
 
@@ -130,25 +163,34 @@ internal static class ButtonZoneScanner
         a.Branches.Any(x => b.Branches.Any(y => y.If == x.If && y.Branch != x.Branch));
 
     /// <summary>
-    /// True when the button is an action of a grid row: it sits in the display <c>Template</c> of an
-    /// <c>OmniDataGridColumn</c>, so it repeats on every row. The <c>EditTemplate</c> of a row being edited
-    /// is a small form whose Save is its main action, and a header or filter template is not a row.
+    /// True when the button renders blue (the main action) whatever its state: <c>OmniButtonVariant.Primary</c>,
+    /// or no <c>Variant</c> at all on an <c>OmniButton</c> (OE's default is Primary; an <c>OmniSplitButton</c>
+    /// defaults to Secondary). A variant computed per state is a toggle, not a main action.
     /// </summary>
-    internal static bool InGridRow(ZoneButton button)
+    internal static bool IsMain(ZoneButton button)
     {
-        var column = button.Ancestors.ToList().IndexOf("OmniDataGridColumn");
-        return column > 0 && button.Ancestors[column - 1] == "Template";
+        var style = StyleAttr.Match(button.Markup);
+        return style.Success
+            ? style.Groups["v"].Value == "OmniButtonVariant.Primary"
+            : !button.Markup.StartsWith("<OmniSplitButton", StringComparison.Ordinal);
     }
 
-    /// <summary>
-    /// True when the button renders blue whatever its state: an <c>OmniButton</c> whose variant is
-    /// Primary or left to OE's default (Primary), or an <c>OmniSplitButton</c> set to Primary (OE's
-    /// split button defaults to Secondary). A variant computed per state is a toggle, not a main action.
-    /// </summary>
-    internal static bool IsPrimary(ZoneButton button)
+    /// <summary>Every pair of main (blue) buttons of one zone that can render together.</summary>
+    internal static IEnumerable<(ZoneButton First, ZoneButton Second)> SecondMainActions(string source)
     {
-        var variant = Regex.Match(button.Tag, @"^<\w+\b(?:""[^""]*""|[^>""])*?\bVariant\s*=\s*""(?<v>[^""]*)""");
-        if (!variant.Success) return button.Name == "OmniButton";
-        return variant.Groups["v"].Value == "OmniButtonVariant.Primary";
+        foreach (var zone in Buttons(source).Where(IsMain).GroupBy(b => b.Zone))
+        {
+            var blue = zone.ToList();
+            for (var a = 0; a < blue.Count; a++)
+            {
+                for (var b = a + 1; b < blue.Count; b++)
+                {
+                    if (!Exclusive(blue[a], blue[b]))
+                    {
+                        yield return (blue[a], blue[b]);
+                    }
+                }
+            }
+        }
     }
 }

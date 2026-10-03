@@ -100,22 +100,10 @@ done
 # shellcheck disable=SC2086
 sh "$WORKSPACE/deploy/scripts/check-expand-migration-up.sh" $PENDING_MIGRATION_FILES
 
-BACKUP_DIR="$STATE_DIR/backups"
-install -d -m 700 "$BACKUP_DIR"
-BACKUP_PREFIX="${APPNAME_VALUE}-${ENV_VALUE}"
-BACKUP_FILE="$BACKUP_DIR/${BACKUP_PREFIX}-$(date +%Y%m%d-%H%M%S).sql.gz"
-BACKUP_TMP="${BACKUP_FILE%.sql.gz}.sql.tmp"
-echo ">>> Taking mandatory pre-migration database backup..."
-if ! docker exec "$DB_CONTAINER" pg_dump -U "$DB_USER_VALUE" -d "$DB_NAME_VALUE" --no-owner --no-acl > "$BACKUP_TMP" \
-   || [ ! -s "$BACKUP_TMP" ] \
-   || ! gzip -c "$BACKUP_TMP" > "$BACKUP_FILE"; then
-  rm -f "$BACKUP_TMP" "$BACKUP_FILE"
-  echo "FATAL: pre-migration backup failed; refusing to mutate production." >&2
-  exit 1
-fi
-rm -f "$BACKUP_TMP"
-ls -1t "$BACKUP_DIR"/${BACKUP_PREFIX}-*.sql.gz 2>/dev/null | tail -n +11 | xargs -r rm -f
-
+# No database backup before migrating, like the blue-green path (BlueGreenMigrationGate): the
+# safety is the expand/contract check just above, which lets the previous colour run on the migrated
+# schema. The full pg_dump this script used to take hit the 4 GiB file limit of an agent step and
+# refused the fast release (run 2525, 2026-10-03). Removed on the user's decision of 2026-10-03.
 echo ">>> Running the migration bundle once."
 $COMPOSE --profile "$IDLE" run --rm --no-deps \
   -e AETHEUS_RUN_MIGRATIONS=true -e AETHEUS_MIGRATE_ONLY=true "back-$IDLE"

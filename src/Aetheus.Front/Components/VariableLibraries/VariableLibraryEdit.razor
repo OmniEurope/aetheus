@@ -124,14 +124,15 @@ else
                 <OmniDataGridColumn Frozen="true" TItem="VariableEntryDto" Property="Key" Title="@L["Key"]" Filterable="true" >
                     <Template Context="entry">
                         @* Recette R-292: a copy button beside the key and beside the value, blue on every row: a STD-BTN
-                           exception chosen by the user (R-435, 2026-09-28). *@
+                           exception chosen by the user (R-435, 2026-09-28). R2-064: on the left of the text, so the
+                           buttons line up whatever the length of the value. *@
                         <span class="library-cell">
-                            <span class="clickable-cell" role="button" tabindex="0" @onclick="@(() => EditEntry(entry))"
-                                @onkeydown="@(e => OnEditableCellKeyDown(e, entry))">@entry.Key</span>
                             <span @onclick:stopPropagation="true">
                                 <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@(() => CopyAsync(entry.Key))" Class="library-copy-btn"
                                             title="@L["CopyKey"]" Label="@L["CopyKey"]"><OmniIcon Name="OmniIconName.Copy" /></OmniButton>
                             </span>
+                            <span class="clickable-cell" role="button" tabindex="0" @onclick="@(() => EditEntry(entry))"
+                                @onkeydown="@(e => OnEditableCellKeyDown(e, entry))">@entry.Key</span>
                         </span>
                     </Template>
                     <EditTemplate Context="entry">
@@ -143,12 +144,12 @@ else
                 <OmniDataGridColumn TItem="VariableEntryDto" Property="Value" Title="@L["Value"]" Filterable="true" >
                     <Template Context="entry">
                         <span class="library-cell">
-                            <span class="clickable-cell" role="button" tabindex="0" @onclick="@(() => EditEntry(entry))"
-                                @onkeydown="@(e => OnEditableCellKeyDown(e, entry))">@entry.Value</span>
                             <span @onclick:stopPropagation="true">
                                 <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@(() => CopyAsync(entry.Value))" Class="library-copy-btn"
                                             title="@L["CopyValue"]" Label="@L["CopyValue"]"><OmniIcon Name="OmniIconName.Copy" /></OmniButton>
                             </span>
+                            <span class="clickable-cell" role="button" tabindex="0" @onclick="@(() => EditEntry(entry))"
+                                @onkeydown="@(e => OnEditableCellKeyDown(e, entry))">@entry.Value</span>
                         </span>
                     </Template>
                     <EditTemplate Context="entry">
@@ -164,9 +165,10 @@ else
                 </OmniDataGridColumn>
                 <OmniDataGridColumn TItem="VariableEntryDto" Title="" Width="160px" Sortable="false" TextAlign="OmniDataGridTextAlign.End" Filterable="false" >
                     <Template Context="entry">
-                        @* Recette R-293: every action filled; Edit in the secondary variant. *@
-                        <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@(() => ShowVersions(entry))" title="@L["History"]" Label="@L["History"]"><OmniIcon Name="OmniIconName.Reset" /></OmniButton>
-                        <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@(() => EditEntry(entry))" title="@L["Edit"]" Label="@L["Edit"]"><OmniIcon Name="OmniIconName.Edit" /></OmniButton>
+                        @* Recette R-293: every action filled. R2-066 (2026-10-02, user choice against STD-BTN): History
+                           blue, Edit green, recorded in ButtonRoleColourGuardTests. *@
+                        <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@(() => ShowVersions(entry))" title="@L["History"]" Label="@L["History"]"><OmniIcon Name="OmniIconName.Reset" /></OmniButton>
+                        <OmniButton Variant="OmniButtonVariant.Success" OnClick="@(() => EditEntry(entry))" title="@L["Edit"]" Label="@L["Edit"]"><OmniIcon Name="OmniIconName.Edit" /></OmniButton>
                         <OmniButton Variant="OmniButtonVariant.Danger" OnClick="@(() => DeleteEntry(entry))" title="@L["Delete"]"><OmniIcon Name="OmniIconName.Delete" /></OmniButton>
                     </Template>
                     <EditTemplate Context="entry">

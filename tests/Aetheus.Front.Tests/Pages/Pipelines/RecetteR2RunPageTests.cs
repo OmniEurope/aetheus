@@ -82,6 +82,19 @@ public sealed class RecetteR2RunPageTests : BunitContext
     }
 
     [Fact]
+    public void R2_048_ATileThatNamesARun_TakesTwoColumns_AShortActorOne()
+    {
+        _handler.SetJsonResponse("api/pipelines/runs/7/lineage", new PipelineRunLineageDto { Downstream = FollowUps(1) });
+        var naming = Render<PipelineRunLineageTile>(parameters => parameters.Add(component => component.Run, Run(7)));
+        naming.WaitForAssertion(() => Assert.Contains("run-lineage-tile--wide", naming.Find(".run-lineage-tile").ClassName, StringComparison.Ordinal));
+
+        _handler.SetJsonResponse("api/pipelines/runs/8/lineage", new PipelineRunLineageDto { TriggeredBy = "claude" });
+        var alone = Render<PipelineRunLineageTile>(parameters => parameters.Add(component => component.Run, Run(8)));
+        alone.WaitForAssertion(() => Assert.Contains("claude", alone.Find(".run-lineage-actor").TextContent, StringComparison.Ordinal));
+        Assert.DoesNotContain("run-lineage-tile--wide", alone.Find(".run-lineage-tile").ClassName, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void R2_026_TheDialog_ListsEveryFollowUp_AsLinks()
     {
         var cut = Render<PipelineRunLineageDialog>(parameters => parameters
@@ -289,6 +302,24 @@ public sealed class RecetteR2RunPageTests : BunitContext
         cut.WaitForAssertion(() => Assert.Contains("Approve", cut.Markup, StringComparison.Ordinal));
         Assert.Empty(cut.FindAll(".approval-reload-first"));
         Assert.Contains(_handler.Requests, request => request.Url.Contains("appsettings.json", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void R2_046_TheCommentField_AppearsOnRequest_BesideApproveAndReject()
+    {
+        var cut = Render<PipelineRunApprovalPanel>(parameters => parameters.Add(component => component.Approval, PendingApproval()));
+        cut.WaitForAssertion(() => Assert.Contains("Approve", cut.Markup, StringComparison.Ordinal));
+
+        Assert.Empty(cut.FindAll("textarea"));
+        var add = cut.Find("button.approval-add-comment");
+        Assert.Contains("omni-button--secondary", add.ClassName, StringComparison.Ordinal);
+        Assert.Contains("ApprovalAddComment", add.TextContent, StringComparison.Ordinal);
+
+        add.Click();
+
+        Assert.Single(cut.FindAll("textarea"));
+        Assert.Empty(cut.FindAll("button.approval-add-comment"));
+        Assert.Single(cut.FindAll("button.omni-button--primary"));
     }
 
     [Fact]

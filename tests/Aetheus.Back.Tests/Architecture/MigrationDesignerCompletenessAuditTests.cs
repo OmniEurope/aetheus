@@ -14,7 +14,7 @@ public sealed class MigrationDesignerCompletenessAuditTests
             "Aetheus.Back",
             "Data",
             "Migrations");
-        var migrationFiles = RepositoryScan.Enumerate(migrationDirectory, "*.cs", SearchOption.TopDirectoryOnly)
+        var migrationFiles = RepositoryScan.EnumerateTopLevel(migrationDirectory, "*.cs")
             .Where(path => Regex.IsMatch(
                 Path.GetFileName(path),
                 @"^\d{14}_.+(?<!\.Designer)\.cs$",

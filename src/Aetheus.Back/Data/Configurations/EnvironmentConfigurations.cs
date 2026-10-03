@@ -12,9 +12,6 @@ internal sealed class EnvironmentConfiguration : IEntityTypeConfiguration<Enviro
         // Per-project name uniqueness (was global): lets the same environment name (e.g. "Staging")
         // exist across projects and supports environment duplication into another project.
         builder.HasIndex(e => new { e.Name, e.ProjectId }).IsUnique();
-        // git's own ref-name limit is far higher, but a branch name is a short identifier here and an
-        // unbounded column would be the only free-text field on this entity without a ceiling.
-        builder.Property(e => e.AdvanceBranchName).HasMaxLength(255);
         builder.HasOne(e => e.Project)
                .WithMany()
                .HasForeignKey(e => e.ProjectId)

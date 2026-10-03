@@ -45,10 +45,6 @@ public class AppMetricsViewRenderTests
             .GetField(field, BindingFlags.NonPublic | BindingFlags.Instance)!
             .GetValue(view)!;
 
-    private static T GetProperty<T>(AppMetricsView view, string property)
-        => (T)typeof(AppMetricsView)
-            .GetProperty(property, BindingFlags.NonPublic | BindingFlags.Instance)!
-            .GetValue(view)!;
 
     private static int Count(AppMetricsView view, string field)
         => Get<System.Collections.IEnumerable>(view, field).Cast<object>().Count();
@@ -113,9 +109,25 @@ public class AppMetricsViewRenderTests
     [Fact]
     public void TimeAxisFormatFollowsTheSelectedWindow()
     {
-        Assert.Equal("{0:HH:mm}", GetProperty<string>(Project(Series(2, false, false), hours: 24), "TimeFormatString"));
-        Assert.Equal("{0:MM-dd HH:mm}", GetProperty<string>(Project(Series(2, false, false), hours: 168), "TimeFormatString"));
+        // Day before month for a French user (recette 2026-10-02: the axis read "09-03").
+        var previous = System.Globalization.CultureInfo.CurrentCulture;
+        try
+        {
+            System.Globalization.CultureInfo.CurrentCulture = new System.Globalization.CultureInfo("fr-FR");
+            var at = new DateTime(2026, 9, 3, 14, 5, 0);
+            Assert.Equal("14:05", TimeLabel(Project(Series(2, false, false), hours: 24), at));
+            Assert.Equal("03/09 14:05", TimeLabel(Project(Series(2, false, false), hours: 168), at));
+        }
+        finally
+        {
+            System.Globalization.CultureInfo.CurrentCulture = previous;
+        }
     }
+
+    private static string TimeLabel(AppMetricsView view, DateTime value)
+        => (string)typeof(AppMetricsView)
+            .GetMethod("TimeLabel", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .Invoke(view, [value])!;
 
     [Fact]
     public void PointsCarryARealTimestamp_NotAFormattedStringCategory()

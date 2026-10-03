@@ -25,10 +25,7 @@ public sealed class ScanFloorGuardTests
         "ScanFloorGuardTests.cs",
         // Walks per-directory and tolerates a directory with no markdown, so an empty result is a valid
         // answer rather than a broken scan. Its own second test asserts the overall scan is not empty.
-        "EmDashDocumentationAuditTests.cs",
-        // Its .cs scan goes through the floor; the .razor pass deliberately tolerates an empty result,
-        // because only the front project has components and every backend project would fail otherwise.
-        "FileSizeAuditTests.cs"
+        "EmDashDocumentationAuditTests.cs"
     };
 
     [Theory]
@@ -40,7 +37,7 @@ public sealed class ScanFloorGuardTests
         Assert.True(Directory.Exists(folder), $"Guard folder not found: {relativeFolder}");
 
         var offenders = new List<string>();
-        foreach (var file in RepositoryScan.Enumerate(folder, "*.cs", SearchOption.TopDirectoryOnly))
+        foreach (var file in RepositoryScan.EnumerateTopLevel(folder, "*.cs"))
         {
             if (Allowed.Contains(Path.GetFileName(file))) continue;
 

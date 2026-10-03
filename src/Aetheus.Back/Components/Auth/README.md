@@ -12,6 +12,7 @@ Authentication and authorization: JWT login, refresh-token rotation, agent regis
 | `/api/auth/register` | POST | Anonymous | Agent server registration |
 | `/api/auth/renew` | POST | User | Renew JWT before expiry |
 | `/api/auth/token/refresh` | POST | Anonymous | Refresh-token rotation |
+| `/api/auth/session-ended` | POST | Anonymous (rate-limited `auth-token`) | Client reports why it ended a session (known reason code + correlation id); one log line, Information for normal ends, Warning for `refresh_replay` and `refresh_rejected` (R2-018) |
 | `/api/auth/external-login` | POST | Trusted gateway | External provider login; requires the shared `X-Aetheus-External-Auth` gateway secret |
 | `/api/auth/registration-tokens` | GET | Admin | List registration tokens |
 | `/api/auth/registration-tokens/{id}` | GET | Admin | Single registration token (wizard verify-step poll) |
@@ -34,7 +35,7 @@ Authentication and authorization: JWT login, refresh-token rotation, agent regis
 | `/api/roles/{id}/users` | POST | Admin | Ajouter un utilisateur au role |
 | `/api/roles/{id}/users/{userId}` | DELETE | Admin | Retirer un utilisateur du role |
 | `/api/users/{id}/effective-permissions` | GET | Admin | User effective permissions |
-| `/api/users/me/permissions` | GET | User | Current user permissions |
+| `/api/users/me/permissions` | GET | User | Current user permissions; for the bootstrap identity (deployment smoke account or configured bootstrap admin, no user row), built from the token's role claims (R2-014) |
 
 ## Key Classes
 
@@ -47,7 +48,7 @@ Authentication and authorization: JWT login, refresh-token rotation, agent regis
 - `IRoleRepository` / `RoleRepository` -- role EF access
 - `ITotpService` / `TotpService` -- TOTP secret generation and verification
 - `AgentTokenAuthenticationHandler` -- validates agent bearer tokens
-- `JwtOptions` -- JWT configuration binding
+- `JwtOptions` (in `Components/Shared/`) -- JWT configuration binding
 
 ## Cross-Module Dependencies
 

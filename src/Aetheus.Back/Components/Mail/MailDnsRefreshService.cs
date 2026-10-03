@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 
+using Aetheus.Back.Services;
+
 namespace Aetheus.Back.Components.Mail;
 
 /// <summary>
@@ -10,7 +12,8 @@ namespace Aetheus.Back.Components.Mail;
 public sealed class MailDnsRefreshService(
     IServiceScopeFactory scopeFactory,
     TimeProvider timeProvider,
-    ILogger<MailDnsRefreshService> logger) : PeriodicBackgroundService(TimeSpan.FromHours(6))
+    ILogger<MailDnsRefreshService> logger,
+    IPostgresLeaderLease? leaderLease = null) : PeriodicBackgroundService(TimeSpan.FromHours(6), leaderLease, "aetheus:mail-dns-refresh")
 {
     internal const int DomainsPerPass = 50;
     internal static readonly TimeSpan RecheckAfter = TimeSpan.FromHours(6);

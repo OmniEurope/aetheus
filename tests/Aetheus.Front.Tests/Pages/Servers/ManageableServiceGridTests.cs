@@ -40,9 +40,13 @@ public class ManageableServiceGridTests : BunitContext
     {
         var cut = RenderGrid(Svc("nginx", running: false), new ServiceActionState(9, "Start", phase));
 
-        var bar = cut.Find("[role='progressbar']");
+        // Recette R2-030 (2026-10-02): said above the grid, with the bar, not only under the status.
+        var banner = cut.Find(".service-actions-in-flight");
+        Assert.Contains(textKey + "Banner", banner.TextContent, StringComparison.Ordinal);
+        Assert.Equal("/tasks/9", banner.QuerySelector("a")!.GetAttribute("href"));
+        var bar = Assert.Single(cut.FindAll("[role='progressbar']"));
         Assert.Contains("omni-progress--indeterminate", bar.ClassList);
-        Assert.Contains(textKey, bar.GetAttribute("aria-label"), StringComparison.Ordinal);
+        Assert.NotNull(bar.Closest(".service-actions-in-flight"));
         // The line linked to the task stays beside the bar.
         Assert.Equal("/tasks/9", cut.Find(".service-action-state a").GetAttribute("href"));
     }
@@ -55,6 +59,7 @@ public class ManageableServiceGridTests : BunitContext
         var cut = RenderGrid(Svc("nginx", running: true), new ServiceActionState(9, "Start", phase));
 
         Assert.Empty(cut.FindAll("[role='progressbar']"));
+        Assert.Empty(cut.FindAll(".service-actions-in-flight"));
         Assert.Contains(textKey, cut.Find(".service-action-state a").TextContent, StringComparison.Ordinal);
     }
 

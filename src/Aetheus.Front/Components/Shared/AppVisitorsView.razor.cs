@@ -39,7 +39,7 @@ public partial class AppVisitorsView
             var series = await Api.Monitoring.GetAppVisitorSeriesAsync(AppId);
             _today = series?.Today ?? 0;
             _points = series?.Points
-                .Select(point => new ChartPoint(point.DayUtc.ToString("MM-dd"), point.UniqueVisitors))
+                .Select(point => new ChartPoint(DateDisplay.DayMonth(point.DayUtc), point.UniqueVisitors))
                 .ToList() ?? [];
         }
         catch (HttpRequestException)

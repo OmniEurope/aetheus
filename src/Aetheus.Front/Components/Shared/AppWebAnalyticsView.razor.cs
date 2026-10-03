@@ -47,7 +47,7 @@ public partial class AppWebAnalyticsView : AppWebAnalyticsSummaryViewBase, IAsyn
     protected IReadOnlyList<DailyPoint> DailyPoints =>
         _summary?.Daily.Select(point =>
             new DailyPoint(
-                point.DayUtc.ToString("MM-dd"),
+                DateDisplay.DayMonth(point.DayUtc),
                 point.UniqueVisitors,
                 point.PageViews)).ToList() ?? [];
     protected IReadOnlyList<OmniChartPoint> DailyVisitorPoints => OmniChartData.Indexed(DailyPoints, point => point.UniqueVisitors, point => point.Label);

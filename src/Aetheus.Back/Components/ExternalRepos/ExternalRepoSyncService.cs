@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: EUPL-1.2
 using Aetheus.Back.Components.Git;
 using Aetheus.Back.Configuration;
+using Aetheus.Back.Services;
 using Microsoft.Extensions.Options;
 
 namespace Aetheus.Back.Components.ExternalRepos;
@@ -12,11 +13,18 @@ namespace Aetheus.Back.Components.ExternalRepos;
 public sealed class ExternalRepoSyncService(
     IServiceScopeFactory scopeFactory,
     TimeProvider timeProvider,
-    ILogger<ExternalRepoSyncService> logger) : BackgroundService
+    ILogger<ExternalRepoSyncService> logger,
+    IPostgresLeaderLease? leaderLease = null) : BackgroundService
 {
     private static readonly TimeSpan PollInterval = BackendRuntimeDefaults.SchedulerCheckInterval;
 
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    // Only the live colour runs it (decision of 2026-10-02, PostgresLeaderLease).
+    protected override Task ExecuteAsync(CancellationToken stoppingToken) =>
+        leaderLease is null
+            ? RunLeaderLoopAsync(stoppingToken)
+            : leaderLease.RunAsLeaderAsync("aetheus:external-repo-sync", RunLeaderLoopAsync, stoppingToken);
+
+    private async Task RunLeaderLoopAsync(CancellationToken stoppingToken)
     {
         using var timer = new PeriodicTimer(PollInterval);
         while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false))

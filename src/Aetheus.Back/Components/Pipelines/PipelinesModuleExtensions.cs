@@ -13,6 +13,7 @@ public static class PipelinesModuleExtensions
     {
         services.AddScoped<IPipelineRepository, PipelineRepository>();
         services.AddScoped<IPipelineRunLineageReader, PipelineRunLineageRepository>();
+        services.AddScoped<IPipelineResourceLockRepository, PipelineResourceLockRepository>();
         services.AddScoped<IPipelineRunLineageService, PipelineRunLineageService>();
         services.AddScoped<IPipelineFavoriteRepository, PipelineFavoriteRepository>();
         services.AddScoped<IPipelineFavoriteService, PipelineFavoriteService>();
@@ -69,6 +70,12 @@ public static class PipelinesModuleExtensions
         services.AddScoped<IPipelineTemplateService, PipelineTemplateService>();
         services.AddScoped<IPipelineWebhookService, PipelineWebhookService>();
         services.AddScoped<IPipelineOwnerAuthorization, PipelineOwnerAuthorization>();
+        // Only the colour behind the public API address leads (decision of 2026-10-02): the lease asks
+        // the probe, which asks the address itself which instance answers.
+        services.AddHttpClient(LiveInstanceProbe.HttpClientName, client => client.Timeout = TimeSpan.FromSeconds(5));
+        services.AddSingleton<LiveInstanceProbe>();
+        services.AddSingleton<ILiveInstanceProbe>(provider => provider.GetRequiredService<LiveInstanceProbe>());
+        services.AddHostedService(provider => provider.GetRequiredService<LiveInstanceProbe>());
         services.AddSingleton<IPostgresLeaderLease, PostgresLeaderLease>();
         // Pipeline chaining: trigger downstream pipelines when an upstream run succeeds (on_success:).
         services.AddScoped<Services.DomainEvents.IDomainEventHandler<Events.PipelineRunCompletedEvent>, PipelineRunCompletedDownstreamHandler>();

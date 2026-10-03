@@ -21,33 +21,53 @@ public interface IPostgresLeaderLease
 /// Holds a PostgreSQL session advisory lock while one background worker is active. During
 /// blue-green overlap only one backend therefore schedules, reconciles, or prunes data.
 /// A heartbeat detects a severed lease connection and cancels the leader work fail-closed.
+/// <para>
+/// Only the live colour leads (decision of 2026-10-02). A reserve colour, which
+/// <see cref="ILiveInstanceProbe"/> reports as <see cref="InstanceServingState.Standby"/>, never
+/// takes a lease, and a leader that finds itself in reserve for <see cref="StandbyBeatsBeforeYield"/>
+/// heartbeats in a row cancels its work and releases the lease for the live colour. An
+/// <see cref="InstanceServingState.Unknown"/> state changes nothing.
+/// </para>
 /// </summary>
 public sealed class PostgresLeaderLease : IPostgresLeaderLease
 {
     private static readonly TimeSpan RetryDelay = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan HeartbeatInterval = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan ReleaseTimeout = TimeSpan.FromSeconds(5);
+
+    /// <summary>Consecutive reserve readings before a leader yields: one switch can be in flight.</summary>
+    internal const int StandbyBeatsBeforeYield = 3;
+
     private readonly IConfiguration _configuration;
     private readonly ILogger<PostgresLeaderLease> _logger;
     private readonly TimeSpan _retryDelay;
+    private readonly TimeSpan _heartbeatInterval;
+    private readonly ILiveInstanceProbe? _liveProbe;
 
     public PostgresLeaderLease(
         IConfiguration configuration,
-        ILogger<PostgresLeaderLease> logger)
-        : this(configuration, logger, RetryDelay)
+        ILogger<PostgresLeaderLease> logger,
+        ILiveInstanceProbe? liveProbe = null)
+        : this(configuration, logger, RetryDelay, liveProbe)
     {
     }
 
     internal PostgresLeaderLease(
         IConfiguration configuration,
         ILogger<PostgresLeaderLease> logger,
-        TimeSpan retryDelay)
+        TimeSpan retryDelay,
+        ILiveInstanceProbe? liveProbe = null,
+        TimeSpan? heartbeatInterval = null)
     {
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(retryDelay, TimeSpan.Zero);
         _configuration = configuration;
         _logger = logger;
         _retryDelay = retryDelay;
+        _liveProbe = liveProbe;
+        _heartbeatInterval = heartbeatInterval ?? HeartbeatInterval;
     }
+
+    private bool InReserve => _liveProbe?.State == InstanceServingState.Standby;
 
     public async Task RunSerializedAsync(
         string operationName,
@@ -94,14 +114,17 @@ public sealed class PostgresLeaderLease : IPostgresLeaderLease
         {
             try
             {
+                // A reserve colour runs the previous release: it never competes for leadership.
+                if (InReserve)
+                {
+                    await Task.Delay(_retryDelay, stoppingToken).ConfigureAwait(false);
+                    continue;
+                }
+
                 await using var connection = new NpgsqlConnection(connectionString);
                 await connection.OpenAsync(stoppingToken).ConfigureAwait(false);
 
-                await using var acquire = new NpgsqlCommand(
-                    "SELECT pg_try_advisory_lock(hashtextextended(@name, 0))", connection);
-                acquire.Parameters.AddWithValue("name", leaseName);
-                var acquired = (bool)(await acquire.ExecuteScalarAsync(stoppingToken).ConfigureAwait(false) ?? false);
-                if (!acquired)
+                if (!await TryAcquireAsync(connection, leaseName, stoppingToken).ConfigureAwait(false))
                 {
                     await Task.Delay(_retryDelay, stoppingToken).ConfigureAwait(false);
                     continue;
@@ -112,14 +135,9 @@ public sealed class PostgresLeaderLease : IPostgresLeaderLease
                 var work = leaderWork(leaseLost.Token);
                 try
                 {
-                    while (!work.IsCompleted)
-                    {
-                        await Task.Delay(HeartbeatInterval, stoppingToken).ConfigureAwait(false);
-                        await using var heartbeat = new NpgsqlCommand("SELECT 1", connection);
-                        await heartbeat.ExecuteScalarAsync(stoppingToken).ConfigureAwait(false);
-                    }
-
-                    await work.ConfigureAwait(false);
+                    // Traffic moved to another colour: the lease was handed over, wait for it back.
+                    if (await HoldWhileWorkingAsync(connection, leaseName, work, leaseLost, stoppingToken).ConfigureAwait(false))
+                        continue;
                     return;
                 }
                 catch
@@ -147,6 +165,44 @@ public sealed class PostgresLeaderLease : IPostgresLeaderLease
                 await Task.Delay(_retryDelay, stoppingToken).ConfigureAwait(false);
             }
         }
+    }
+
+    private static async Task<bool> TryAcquireAsync(NpgsqlConnection connection, string leaseName, CancellationToken ct)
+    {
+        await using var acquire = new NpgsqlCommand(
+            "SELECT pg_try_advisory_lock(hashtextextended(@name, 0))", connection);
+        acquire.Parameters.AddWithValue("name", leaseName);
+        return (bool)(await acquire.ExecuteScalarAsync(ct).ConfigureAwait(false) ?? false);
+    }
+
+    /// <summary>
+    /// Heartbeats the lease while the leader work runs. Returns false once the work completed (its
+    /// outcome rethrown), true when this instance found itself in reserve and handed the lease over
+    /// after cancelling the work.
+    /// </summary>
+    private async Task<bool> HoldWhileWorkingAsync(
+        NpgsqlConnection connection, string leaseName, Task work, CancellationTokenSource leaseLost, CancellationToken stoppingToken)
+    {
+        var reserveBeats = 0;
+        while (!work.IsCompleted && reserveBeats < StandbyBeatsBeforeYield)
+        {
+            await Task.Delay(_heartbeatInterval, stoppingToken).ConfigureAwait(false);
+            await using var heartbeat = new NpgsqlCommand("SELECT 1", connection);
+            await heartbeat.ExecuteScalarAsync(stoppingToken).ConfigureAwait(false);
+            reserveBeats = InReserve ? reserveBeats + 1 : 0;
+        }
+
+        if (work.IsCompleted)
+        {
+            await work.ConfigureAwait(false);
+            return false;
+        }
+
+        _logger.LogInformation("Yielding PostgreSQL leader lease {LeaseName}: this instance is a reserve colour", leaseName);
+        await leaseLost.CancelAsync().ConfigureAwait(false);
+        try { await work.ConfigureAwait(false); }
+        catch (OperationCanceledException) when (leaseLost.IsCancellationRequested) { }
+        return true;
     }
 
     private async Task ReleaseLeaseAsync(NpgsqlConnection connection, string leaseName)

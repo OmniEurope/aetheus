@@ -1,6 +1,7 @@
 #!/bin/sh
 # SPDX-License-Identifier: EUPL-1.2
-# Everything the persistent demo environment needs BEFORE the native blue-green steps act on it.
+# Everything a blue-green host environment (the demo, or the nightly QA) needs BEFORE the native
+# blue-green steps act on it.
 #
 # The cutover itself - migrate, start the idle colour, move traffic, probe, commit, roll back - now
 # belongs to the `bluegreen-*` and `smoke` step types through the host-bluegreen-deploy template.
@@ -20,6 +21,11 @@
 # script's. Every name comes from the aetheus.demo library; nothing here names the host.
 #
 # It performs no cutover and holds no transaction: a failure here leaves the live demo untouched.
+#
+# Recette R-523: two environments use it. aetheus-nightly deploys its QA here (DEPLOY_ENV_NAME=nightly,
+# images from the run's CI payload), and aetheus-demo deploys the version published on GitHub
+# (DEPLOY_ENV_NAME=demo, IMAGE_SOURCE=local: images built on this host from the public sources, named
+# by DEPLOY_SOURCE_SHA, the public commit). Every other name still comes from the environment's library.
 set -eu
 
 fail() {
@@ -36,17 +42,32 @@ fail() {
 require_set() {
   [ -n "$2" ] || fail "$1 is not set."
 }
+DEPLOY_ENV_NAME="${DEPLOY_ENV_NAME:-demo}"
+case "$DEPLOY_ENV_NAME" in
+  demo|nightly) ;;
+  *) fail "DEPLOY_ENV_NAME must be demo or nightly, got '$DEPLOY_ENV_NAME'." ;;
+esac
+IMAGE_SOURCE="${IMAGE_SOURCE:-payload}"
+case "$IMAGE_SOURCE" in
+  payload|local) ;;
+  *) fail "IMAGE_SOURCE must be payload or local, got '$IMAGE_SOURCE'." ;;
+esac
 for name in STATE_DIR ENV_FILE SECRETS_FILE COMPOSE_PROJECT COMPOSE_BASE COMPOSE_OVERRIDE APP_HOST API_HOST \
   UPSTREAM_CONF UPSTREAM_LINK UPSTREAM_DEFINE PUBLIC_ADMIN_PASSWORD; do
   eval "require_set $name \"\${$name:-}\""
 done
 
-# State lives under /var/lib and nowhere else: a state directory pointing at /etc or a home directory
-# is a mis-set library, not a deployment.
+# State lives in the run's workspace and nowhere else (user decision, 2026-10-02: only production
+# Aetheus has a directory on the host). The demo and the QA are rebuilt by every run, so their
+# environment file, secrets and blue-green journal go with the workspace. A state directory pointing
+# anywhere else is a mis-set pipeline, not a deployment.
+WORKSPACE="${WORKSPACE:?WORKSPACE is required}"
+case "$WORKSPACE" in /*) ;; *) fail "WORKSPACE must be an absolute path: $WORKSPACE" ;; esac
 case "$STATE_DIR" in
-  /var/lib/*/..*|/var/lib/*/*/*) fail "The demo state directory must be a direct child of /var/lib: $STATE_DIR" ;;
-  /var/lib/*) ;;
-  *) fail "The demo state directory must live under /var/lib: $STATE_DIR" ;;
+  *..*) fail "The state directory must not contain a traversal: $STATE_DIR" ;;
+  "$WORKSPACE"/*/*) fail "The state directory must be a direct child of the run workspace: $STATE_DIR" ;;
+  "$WORKSPACE"/?*) ;;
+  *) fail "The state directory must live in the run workspace ($WORKSPACE): $STATE_DIR" ;;
 esac
 case "$ENV_FILE" in "$STATE_DIR"/*) ;; *) fail "The demo environment file must live in the demo state directory." ;; esac
 case "$SECRETS_FILE" in "$STATE_DIR"/*) ;; *) fail "The demo secrets file must live in the demo state directory." ;; esac
@@ -74,8 +95,8 @@ case "${STATE_DIR}|${ENV_FILE}|${COMPOSE_PROJECT}|${APP_HOST}|${API_HOST}|${UPST
   *prod*) fail "A demo identity contains a production token." ;;
 esac
 
-WORKSPACE="${WORKSPACE:?WORKSPACE is required}"
-SOURCE_SHA="${BUILD_SOURCEVERSION:?BUILD_SOURCEVERSION is required}"
+# The revision the images carry: the run's own commit, or the public commit the demo was built from.
+SOURCE_SHA="${DEPLOY_SOURCE_SHA:-${BUILD_SOURCEVERSION:?BUILD_SOURCEVERSION is required}}"
 [ "${#SOURCE_SHA}" -eq 40 ] || fail "Nightly source SHA must contain exactly 40 characters."
 case "$SOURCE_SHA" in *[!0-9a-fA-F]*) fail "Nightly source SHA is not hexadecimal." ;; esac
 # shellcheck source=deploy-identity.sh
@@ -130,15 +151,20 @@ for vault_secret in DB_PASSWORD JWT_KEY ENCRYPTION_KEY ENCRYPTION_SALT; do
   eval "vault_value=\${$vault_secret:-}"
   [ -n "$vault_value" ] \
     || fail "$vault_secret is not provided by the demo Vault; refusing to deploy the demo."
+  # The shape the Vault's Generate button produces (hexadecimal, base64 or base64url), and nothing
+  # else: no space, quote or dollar can reach the env file (user decision, 2026-10-02: the former
+  # hexadecimal-only rule contradicted the generator, and the application accepts all three).
   case "$vault_value" in
-    *[!0-9a-fA-F]*) fail "$vault_secret must be a hexadecimal string." ;;
+    *[!A-Za-z0-9+/=_-]*) fail "$vault_secret must hold only letters, digits and + / = _ - (as the Vault generates it)." ;;
   esac
 done
 [ "${#ENCRYPTION_KEY}" -ge 32 ] || fail "ENCRYPTION_KEY is too short."
 [ "${#ENCRYPTION_SALT}" -ge 16 ] || fail "ENCRYPTION_SALT is too short."
-# The administrator password of a public demo is advertised on purpose, so it is library data
-# (PUBLIC_ADMIN_PASSWORD), not a secret: a vault value would be masked out of the very smoke step that
-# has to use it. Still only a shape check here, never a literal.
+# The administrator password. The public demo advertises it on purpose, so it is library data
+# (aetheus.demo) and is relayed to the smoke through a setvariable line. The QA's is a Vault secret
+# (AETHEUS_SMOKE_ADMIN_PASSWORD in aetheus.qa): the smoke step receives Vault keys directly, while a
+# setvariable line is masked before it is parsed and would hand the smoke "***", so the QA sets
+# PUBLISH_SMOKE_PASSWORD=false. Still only a shape check here, never a literal.
 case "$PUBLIC_ADMIN_PASSWORD" in *[!A-Za-z0-9._-]*) fail "PUBLIC_ADMIN_PASSWORD holds characters the env file cannot carry." ;; esac
 
 # The persisted database is encrypted with the values it was created under, so a rotated Vault makes
@@ -215,8 +241,8 @@ if [ ! -f "$ENV_FILE" ]; then
   ENV_TMP="$ENV_FILE.first-deploy.$$"
   cat > "$ENV_TMP" <<ENV_EOF
 APPNAME=$PROJECT_SLUG
-ENV=demo
-DB_NAME=$(printf '%s' "$PROJECT_SLUG" | tr '-' '_')_demo
+ENV=$DEPLOY_ENV_NAME
+DB_NAME=$(printf '%s' "$PROJECT_SLUG" | tr '-' '_')_$DEPLOY_ENV_NAME
 DB_USER=$(printf '%s' "$PROJECT_SLUG" | tr '-' '_')
 DB_PASSWORD=$BOOT_DB_PASSWORD
 JWT_KEY=$BOOT_JWT_KEY
@@ -268,8 +294,8 @@ env_value() {
 
 DEMO_DB_USER="$(printf '%s' "$PROJECT_SLUG" | tr '-' '_')"
 [ "$(env_value APPNAME)" = "$PROJECT_SLUG" ] || fail "Demo APPNAME is invalid."
-[ "$(env_value ENV)" = demo ] || fail "Demo ENV is invalid."
-[ "$(env_value DB_NAME)" = "${DEMO_DB_USER}_demo" ] || fail "Demo database name is invalid."
+[ "$(env_value ENV)" = "$DEPLOY_ENV_NAME" ] || fail "Environment ENV is not $DEPLOY_ENV_NAME."
+[ "$(env_value DB_NAME)" = "${DEMO_DB_USER}_$DEPLOY_ENV_NAME" ] || fail "Environment database name is invalid."
 [ "$(env_value DB_USER)" = "$DEMO_DB_USER" ] || fail "Demo database user is invalid."
 [ "$(env_value API_BASE_URL)" = "https://$API_HOST" ] || fail "Demo API URL is invalid."
 [ "$(env_value FRONT_URL)" = "https://$APP_HOST" ] || fail "Demo front URL is invalid."
@@ -278,7 +304,7 @@ DEMO_DB_USER="$(printf '%s' "$PROJECT_SLUG" | tr '-' '_')"
 [ "$(sed -n 's/^ADMIN_PASSWORD=//p' "$SECRETS_FILE" | tail -n 1)" = "$PUBLIC_ADMIN_PASSWORD" ] \
   || fail "The intentionally public demo credential differs from PUBLIC_ADMIN_PASSWORD."
 for secret_name in DB_PASSWORD JWT_KEY ENCRYPTION_KEY ENCRYPTION_SALT; do
-  grep -Eq "^${secret_name}=[0-9a-f]+$" "$SECRETS_FILE" || fail "Demo secret $secret_name is missing or invalid."
+  grep -Eq "^${secret_name}=[A-Za-z0-9+/=_-]+$" "$SECRETS_FILE" || fail "Demo secret $secret_name is missing or invalid."
   [ "$(env_value "$secret_name")" = "$(sed -n "s/^${secret_name}=//p" "$SECRETS_FILE" | tail -n 1)" ] \
     || fail "Demo environment and persistent secret $secret_name differ."
 done
@@ -290,37 +316,44 @@ grep -Eq "^DEPLOYMENT_BOOTSTRAP_IDENTITY_KEY=[0-9a-f]{64}$" "$ENV_FILE" \
 DEMO_ADMIN_USER="$(env_value ADMIN_USER)"
 [ -n "$DEMO_ADMIN_USER" ] || fail "Demo admin user is missing from the environment file."
 
-# --- 4. Payload: verified against its independent evidence, then loaded --------------------------
-ARTIFACT_DIR="$WORKSPACE/.pipeline-artifacts"
-EVIDENCE_DIR="$WORKSPACE/.nightly-evidence"
-ARTIFACT_SOURCE="$(tr -d '\r\n' < "$ARTIFACT_DIR/source-commit")"
-[ "$ARTIFACT_SOURCE" = "$SOURCE_SHA" ] || fail "Nightly payload belongs to another source commit."
-NODE="$(sh "$WORKSPACE/deploy/scripts/ensure-node-runtime.sh")"
-"$NODE" "$WORKSPACE/deploy/scripts/nightly-evidence.mjs" verify \
-  "$SOURCE_SHA" "$EVIDENCE_DIR/nightly-evidence.json" \
-  "$ARTIFACT_DIR/aetheus-back.tar.gz" \
-  "$ARTIFACT_DIR/aetheus-front.tar.gz" \
-  "$ARTIFACT_DIR/aetheus-vitrine.tar.gz" \
-  "$ARTIFACT_DIR/aetheus-browser-smoke.tar.gz"
-gzip -t "$ARTIFACT_DIR/aetheus-back.tar.gz"
-gzip -t "$ARTIFACT_DIR/aetheus-front.tar.gz"
-gzip -t "$ARTIFACT_DIR/aetheus-browser-smoke.tar.gz"
-
+# --- 4. Images: the CI payload, verified against its independent evidence and loaded, or the images
+# this host built from the public sources (IMAGE_SOURCE=local), which must already be there.
 AETHEUS_BACK_IMAGE="$BACK_IMAGE_REPO:$SOURCE_SHA"
 AETHEUS_FRONT_IMAGE="$FRONT_IMAGE_REPO:$SOURCE_SHA"
 # Named after the environment, not the product: the demo's copy is removed after each run
 # (nightly-demo-evidence.sh) and must never be the one production's smoke is using.
 AETHEUS_BROWSER_SMOKE_IMAGE="$COMPOSE_PROJECT-browser-smoke:$SOURCE_SHA"
 
-gzip -dc "$ARTIFACT_DIR/aetheus-back.tar.gz" | docker load
-gzip -dc "$ARTIFACT_DIR/aetheus-front.tar.gz" | docker load
-gzip -dc "$ARTIFACT_DIR/aetheus-browser-smoke.tar.gz" | docker import \
-  --change 'ENV DOTNET_ROOT=/usr/lib/dotnet-10' \
-  --change 'ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright' \
-  --change 'WORKDIR /src' \
-  --change 'USER pwuser' \
-  --change "LABEL org.opencontainers.image.revision=$SOURCE_SHA" \
-  - "$AETHEUS_BROWSER_SMOKE_IMAGE" >/dev/null
+if [ "$IMAGE_SOURCE" = payload ]; then
+  ARTIFACT_DIR="$WORKSPACE/.pipeline-artifacts"
+  EVIDENCE_DIR="$WORKSPACE/.nightly-evidence"
+  ARTIFACT_SOURCE="$(tr -d '\r\n' < "$ARTIFACT_DIR/source-commit")"
+  [ "$ARTIFACT_SOURCE" = "$SOURCE_SHA" ] || fail "Nightly payload belongs to another source commit."
+  NODE="$(sh "$WORKSPACE/deploy/scripts/ensure-node-runtime.sh")"
+  "$NODE" "$WORKSPACE/deploy/scripts/nightly-evidence.mjs" verify \
+    "$SOURCE_SHA" "$EVIDENCE_DIR/nightly-evidence.json" \
+    "$ARTIFACT_DIR/aetheus-back.tar.gz" \
+    "$ARTIFACT_DIR/aetheus-front.tar.gz" \
+    "$ARTIFACT_DIR/aetheus-vitrine.tar.gz" \
+    "$ARTIFACT_DIR/aetheus-browser-smoke.tar.gz"
+  gzip -t "$ARTIFACT_DIR/aetheus-back.tar.gz"
+  gzip -t "$ARTIFACT_DIR/aetheus-front.tar.gz"
+  gzip -t "$ARTIFACT_DIR/aetheus-browser-smoke.tar.gz"
+
+  gzip -dc "$ARTIFACT_DIR/aetheus-back.tar.gz" | docker load
+  gzip -dc "$ARTIFACT_DIR/aetheus-front.tar.gz" | docker load
+  gzip -dc "$ARTIFACT_DIR/aetheus-browser-smoke.tar.gz" | docker import \
+    --change 'ENV DOTNET_ROOT=/usr/lib/dotnet-10' \
+    --change 'ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright' \
+    --change 'WORKDIR /src' \
+    --change 'USER pwuser' \
+    --change "LABEL org.opencontainers.image.revision=$SOURCE_SHA" \
+    - "$AETHEUS_BROWSER_SMOKE_IMAGE" >/dev/null
+else
+  for image in "$AETHEUS_BACK_IMAGE" "$AETHEUS_FRONT_IMAGE" "$AETHEUS_BROWSER_SMOKE_IMAGE"; do
+    docker image inspect "$image" >/dev/null 2>&1 || fail "The locally built image is missing: $image"
+  done
+fi
 
 for image in "$AETHEUS_BACK_IMAGE" "$AETHEUS_FRONT_IMAGE" "$AETHEUS_BROWSER_SMOKE_IMAGE"; do
   [ "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$image")" = "$SOURCE_SHA" ] \
@@ -341,5 +374,7 @@ echo "##aetheus[setvariable name=AETHEUS_FRONT_IMAGE]$AETHEUS_FRONT_IMAGE"
 echo "##aetheus[setvariable name=SOURCE_COMMIT]$SOURCE_SHA"
 echo "##aetheus[setvariable name=AETHEUS_BROWSER_SMOKE_IMAGE]$AETHEUS_BROWSER_SMOKE_IMAGE"
 echo "##aetheus[setvariable name=AETHEUS_SMOKE_ADMIN_USER]$DEMO_ADMIN_USER"
-echo "##aetheus[setvariable name=AETHEUS_SMOKE_ADMIN_PASSWORD]$PUBLIC_ADMIN_PASSWORD"
+if [ "${PUBLISH_SMOKE_PASSWORD:-true}" != false ]; then
+  echo "##aetheus[setvariable name=AETHEUS_SMOKE_ADMIN_PASSWORD]$PUBLIC_ADMIN_PASSWORD"
+fi
 echo "Demo host prepared for $SOURCE_SHA; the cutover steps own the environment from here."

@@ -102,23 +102,25 @@ else
                     <Template Context="secret">
                         @* Recette R-292: a copy button beside the key, blue on every row (STD-BTN exception, R-436). *@
                         <span class="library-cell">
+                            <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@(() => CopyKey(secret.Key))" Class="library-copy-btn"
+                                        title="@L["CopyKey"]" Label="@L["CopyKey"]"><OmniIcon Name="OmniIconName.Copy" /></OmniButton>
                             <span class="clickable-cell" role="button" tabindex="0"
                                   @onclick="@(() => UpdateSecret(secret))"
                                   @onkeydown="@(e => OnSecretCellKeyDown(e, secret))">@secret.Key</span>
-                            <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@(() => CopyKey(secret.Key))" Class="library-copy-btn"
-                                        title="@L["CopyKey"]" Label="@L["CopyKey"]"><OmniIcon Name="OmniIconName.Copy" /></OmniButton>
                         </span>
                     </Template>
                 </OmniDataGridColumn>
                 <OmniDataGridColumn TItem="VaultSecretDto" Title="@L["Value"]" Width="12.5rem" Sortable="false">
                     <Template Context="secret">
-                        <span class="clickable-cell" role="button" tabindex="0"
-                              @onclick="@(() => UpdateSecret(secret))"
-                              @onkeydown="@(e => OnSecretCellKeyDown(e, secret))">••••••••</span>
                         @* Recette R-292: copies the value without ever showing it (audited server side); blue on every
-                           row (STD-BTN exception chosen by the user, R-436, 2026-09-28). *@
-                        <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@(() => CopySecretValue(secret))" Class="library-copy-btn"
-                                    title="@L["CopyValue"]" Label="@L["CopyValue"]"><OmniIcon Name="OmniIconName.Copy" /></OmniButton>
+                           row (STD-BTN exception chosen by the user, R-436, 2026-09-28). R2-064: left of the value. *@
+                        <span class="library-cell">
+                            <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@(() => CopySecretValue(secret))" Class="library-copy-btn"
+                                        title="@L["CopyValue"]" Label="@L["CopyValue"]"><OmniIcon Name="OmniIconName.Copy" /></OmniButton>
+                            <span class="clickable-cell" role="button" tabindex="0"
+                                  @onclick="@(() => UpdateSecret(secret))"
+                                  @onkeydown="@(e => OnSecretCellKeyDown(e, secret))">••••••••</span>
+                        </span>
                     </Template>
                 </OmniDataGridColumn>
                 <OmniDataGridColumn TItem="VaultSecretDto" Property="UpdatedAt" Title="@L["Updated"]" FormatString="{0:g}" Width="10rem" Filterable="true" FilterType="OmniDataGridColumnFilterType.DateRange" />
@@ -127,7 +129,7 @@ else
                         @if (secret.ExpiresAt.HasValue)
                         {
                             var badge = GetExpiryBadge(secret.ExpiresAt.Value);
-                            <OmniBadge Fill="OmniFill.Solid" Tone="@badge">@secret.ExpiresAt.Value.ToString("yyyy-MM-dd")</OmniBadge>
+                            <OmniBadge Fill="OmniFill.Solid" Tone="@badge">@secret.ExpiresAt.Value.ToString("d")</OmniBadge>
                         }
                     </Template>
                 </OmniDataGridColumn>

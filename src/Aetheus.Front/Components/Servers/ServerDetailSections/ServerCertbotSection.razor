@@ -41,7 +41,7 @@
                     <OmniDataGridColumn TItem="CertbotCertificateDto" Property="ExpiryDate" Title="@L["Expiry"]" Width="11.25rem" Sortable="false" Filterable="true" FilterType="OmniDataGridColumnFilterType.DateRange">
                         <Template Context="c">
                             <OmniStack Orientation="OmniStackOrientation.Horizontal" Gap="OmniSpacing.XSmall" Align="OmniAlignment.Center">
-                                <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-m-0">@c.ExpiryDate.ToString("yyyy-MM-dd")</OmniText>
+                                <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-m-0">@c.ExpiryDate.ToString("d")</OmniText>
                                 @if (IsExpiringSoon(c))
                                 {
                                     <OmniBadge Fill="OmniFill.Solid" Tone="OmniTone.Warning">@L["ExpiringSoon"]</OmniBadge>

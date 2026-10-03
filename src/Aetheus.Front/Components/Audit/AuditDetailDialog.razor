@@ -49,7 +49,7 @@
         </OmniStack>
         <OmniStack Orientation="OmniStackOrientation.Horizontal" Align="OmniAlignment.Center" Justify="OmniJustification.Between" Class="detail-row" Gap="OmniSpacing.Large">
             <OmniText Element="OmniTextElement.Paragraph" Class="omni-u-text-muted"><OmniIcon Name="OmniIconName.Timer" Class="run-tile-icon" /> @L["Timestamp"]</OmniText>
-            <OmniText Element="OmniTextElement.Paragraph">@Log.Timestamp.ToString("yyyy-MM-dd HH:mm:ss")</OmniText>
+            <OmniText Element="OmniTextElement.Paragraph">@Log.Timestamp.ToString("G")</OmniText>
         </OmniStack>
     </OmniStack>
 

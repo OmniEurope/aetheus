@@ -41,6 +41,8 @@ public class ButtonRoleColourGuardTests
     [
         ("Components/Notifications/NotificationBell.razor", @"TriggerVariant=""OmniButtonVariant.Success""",
             "R-170, confirmed by R-385 (2026-09-28): the notification bell is green, the tasks button blue"),
+        ("Components/VariableLibraries/VariableLibraryEdit.razor", @"Variant=""OmniButtonVariant.Success"" OnClick=""@(() => EditEntry(entry))""",
+            "R2-066 (2026-10-02): a library entry's Edit is green, its History blue"),
     ];
 
     /// <summary>
@@ -199,9 +201,9 @@ public class ButtonRoleColourGuardTests
         {
             var rel = Rel(file);
             var blue = ButtonZoneScanner.Buttons(File.ReadAllText(file))
-                .Where(ButtonZoneScanner.IsPrimary)
+                .Where(ButtonZoneScanner.IsMain)
                 .Where(b => !UserChosenSecondBlueButtons.Any(e => e.File == rel
-                    && Regex.IsMatch(b.Tag, $@"OnClick=""[^""]*\b{Regex.Escape(e.Handler)}\b")))
+                    && Regex.IsMatch(b.Markup, $@"OnClick=""[^""]*\b{Regex.Escape(e.Handler)}\b")))
                 .ToList();
             foreach (var zone in blue.GroupBy(b => b.Zone))
             {

@@ -65,6 +65,16 @@ public sealed class PipelineRunApprovalController(ApiClient api, NotifyHelper to
         WaitingWithoutApproval = Pending is null;
     }
 
+    /// <summary>Recette R2-045: the run page reads a waiting run's approval before its first render, so
+    /// the banner is there from the start instead of arriving later and pushing the page down. Returns
+    /// whether it loaded (the page then skips the load it makes behind the first render).</summary>
+    public async Task<bool> LoadIfWaitingAsync(PipelineRunDto? run, CancellationToken ct = default)
+    {
+        if (run?.Status != PipelineStatus.WaitingForApproval) return false;
+        await LoadAsync(run, ct).ConfigureAwait(false);
+        return true;
+    }
+
     public async Task DecideAsync(ApprovalStatus decision)
     {
         if (Pending is null || Deciding) return;

@@ -141,8 +141,9 @@ public class VaultEditTests : BunitContext
         var cut = Render<VaultEdit>(p => p.Add(x => x.Id, 1));
         // Each secret with an ExpiresAt renders a badge showing the formatted expiry date.
         Assert.Contains("EXPIRING", cut.Markup);
-        Assert.Contains(DateTime.UtcNow.AddDays(3).ToString("yyyy-MM-dd"), cut.Markup);
-        Assert.Contains(DateTime.UtcNow.AddDays(-1).ToString("yyyy-MM-dd"), cut.Markup);
+        // In the user's culture, not ISO: a French user reads 05/10/2026.
+        Assert.Contains(DateTime.UtcNow.AddDays(3).ToString("d"), cut.Markup);
+        Assert.Contains(DateTime.UtcNow.AddDays(-1).ToString("d"), cut.Markup);
     }
 
     [Theory]

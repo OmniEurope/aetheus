@@ -91,6 +91,12 @@ public sealed class ScannerManifestTests
         Assert.Contains(".claude", OptionValues(ruff, "--exclude"));
         Assert.Contains("node_modules", OptionValues(ruff, "--exclude"));
         Assert.Contains(".analysis-*", OptionValues(ruff, "--exclude"));
+        // Recette R2-055: the OpenGrep rule corpus is vulnerable and incomplete on purpose (#1094 F821,
+        // #1112 NoPackage). Ruff resolves a relative pattern against its working directory, which the
+        // scanner container does not set, so the path is absolute.
+        Assert.Contains("/src/tests/security-rules", OptionValues(ruff, "--exclude"));
+        var pmd = Assert.Single(manifest.Scanners, scanner => scanner.Key == "pmd-java");
+        Assert.Contains("--exclude=/src/tests/security-rules", pmd.Arguments);
         var openGrep = Assert.Single(manifest.Scanners, scanner => scanner.Key == "opengrep");
         Assert.Contains("--exclude=node_modules", openGrep.Arguments);
         Assert.Contains("--exclude=.claude", openGrep.Arguments);

@@ -15,14 +15,10 @@
 </OmniDataGridColumn>
 <OmniDataGridColumn TItem="AnalysisFindingDto" Property="RuleId" Title="@L["AnalysisRule"]" Width="12rem" Filterable="true" />
 <OmniDataGridColumn TItem="AnalysisFindingDto" Property="Title" Title="@L["Title"]" MinWidth="18rem" Filterable="true">
+    @* Recette R2-053: one line in the fixed-height row, the message behind it on hover. Over two lines,
+       the second one was cut by the row and neither could be read. *@
     <Template Context="finding">
-        <div class="analysis-finding-grid-summary">
-            <a href="@FindingHref(finding.Id, RunId)" class="pipeline-name-link">@finding.Title</a>
-            @if (!string.IsNullOrWhiteSpace(finding.Message))
-            {
-                <span class="analysis-finding-grid-message" title="@finding.Message">@finding.Message</span>
-            }
-        </div>
+        <a href="@FindingHref(finding.Id, RunId)" class="pipeline-name-link analysis-finding-grid-title" title="@TitleTooltip(finding)">@finding.Title</a>
     </Template>
 </OmniDataGridColumn>
 @* The location is the latest occurrence's: a list read from the server cannot sort or filter on it. *@
@@ -34,15 +30,9 @@
         }
         else
         {
-            <div class="analysis-finding-location">
-                <div>
-                    <code title="@finding.LatestOccurrence.FilePath">@finding.LatestOccurrence.FilePath</code>
-                    @if (finding.LatestOccurrence.StartLine is { } line)
-                    {
-                        <span>@L["AnalysisGateLine"] @line</span>
-                    }
-                </div>
-            </div>
+            @* Recette R2-053: path:line on one line, cut at its start so the file name stays visible;
+               the whole location on hover. *@
+            <code class="analysis-finding-location" title="@LocationText(finding.LatestOccurrence)"><bdi>@LocationText(finding.LatestOccurrence)</bdi></code>
         }
     </Template>
 </OmniDataGridColumn>

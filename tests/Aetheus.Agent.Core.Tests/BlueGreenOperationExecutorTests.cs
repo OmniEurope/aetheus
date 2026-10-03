@@ -343,6 +343,78 @@ public sealed class BlueGreenOperationExecutorTests : IDisposable
             environment => Assert.Equal("aetheus-back:deadbeef", environment["AETHEUS_BACK_IMAGE"]));
     }
 
+    // Decision of 2026-10-02: a run undoes its own deployment, never another run's.
+    [Fact]
+    public async Task Rollback_OfAnotherRunsTransaction_IsRefusedAndLeavesItIntact()
+    {
+        var env = BaseEnvironment();
+        Assert.True(BlueGreenContext.TryCreate("aetheus-demo", env, out var context, out _));
+        var journal = new BlueGreenJournal(context!);
+        Assert.True(journal.TryOpen("blue", "green", "rev-1", "2490", out _));
+        env["AETHEUS_BG_OWNER_RUN"] = "2491";
+        var log = new List<string>();
+
+        var result = await CreateExecutor(new FakeShell()).ExecuteAsync(
+            OperationKind.BlueGreenRollback, "aetheus-demo", env, 60,
+            (line, _) => { log.Add(line); return Task.CompletedTask; }, TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains(log, line => line.Contains("belongs to run 2490", StringComparison.Ordinal));
+        Assert.Equal(BlueGreenJournal.Prepared, journal.State);
+    }
+
+    // Without the environment lock, another run may still be mid-deployment: rebuilding the idle colour
+    // would destroy what its open transaction falls back to.
+    [Fact]
+    public async Task Up_WithAnotherRunsOpenTransaction_AndNoEnvironmentLock_RefusesBeforeTouchingAColour()
+    {
+        var env = BaseEnvironment();
+        Assert.True(BlueGreenContext.TryCreate("aetheus-demo", env, out var context, out _));
+        var journal = new BlueGreenJournal(context!);
+        Assert.True(journal.TryOpen("blue", "green", "rev-1", "2490", out _));
+        journal.MarkSwitched();
+        env["AETHEUS_BG_OWNER_RUN"] = "2491";
+        var shell = new FakeShell();
+        var log = new List<string>();
+
+        var result = await CreateExecutor(shell).ExecuteAsync(
+            OperationKind.BlueGreenUp, "aetheus-demo", env, 60,
+            (line, _) => { log.Add(line); return Task.CompletedTask; }, TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains(log, line => line.Contains("Run 2490 left a deployment transaction open", StringComparison.Ordinal));
+        Assert.Empty(shell.DockerEnvironments);
+        Assert.Equal(BlueGreenJournal.Switched, journal.State);
+    }
+
+    // With the lock, no other run can be deploying here: the open transaction is an orphan and is undone first.
+    [Fact]
+    public async Task Up_WithAnOrphanTransaction_AndTheEnvironmentLock_RollsTheOrphanBackFirst()
+    {
+        var env = BaseEnvironment();
+        Assert.True(BlueGreenContext.TryCreate("aetheus-demo", env, out var context, out _));
+        var journal = new BlueGreenJournal(context!);
+        Assert.True(journal.TryOpen("blue", "green", "rev-1", "2490", out _));
+        var confPath = Path.Combine(_root, "upstream.conf");
+        await File.WriteAllTextAsync(confPath, "server 127.0.0.1:10031;\n", TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(
+            Path.Combine(context!.JournalDir, "upstream.before"), "server 127.0.0.1:10029;\n",
+            TestContext.Current.CancellationToken);
+        env["AETHEUS_BG_UPSTREAM_CONF"] = confPath;
+        env["AETHEUS_BG_RELOAD_HELPER"] = "/usr/local/bin/reload";
+        env["AETHEUS_BG_OWNER_RUN"] = "2491";
+        env["AETHEUS_BG_EXCLUSIVE"] = "true";
+        var log = new List<string>();
+
+        await CreateExecutor(new FakeShell(), HttpStatusCode.OK).ExecuteAsync(
+            OperationKind.BlueGreenUp, "aetheus-demo", env, 60,
+            (line, _) => { log.Add(line); return Task.CompletedTask; }, TestContext.Current.CancellationToken);
+
+        Assert.Contains(log, line => line.Contains("is an orphan and is rolled back first", StringComparison.Ordinal));
+        Assert.Equal("server 127.0.0.1:10029;\n", await File.ReadAllTextAsync(confPath, TestContext.Current.CancellationToken));
+        Assert.False(journal.Exists && journal.OwnerRun == "2490", "The orphan transaction is still open.");
+    }
+
     // Only the complete absence of a transaction is "nothing to undo".
     [Fact]
     public async Task Rollback_WithNoOpenTransaction_SucceedsWithoutTouchingAnything()

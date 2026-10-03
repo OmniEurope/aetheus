@@ -9,6 +9,7 @@ Fleet management for Linux and Windows servers: registration, heartbeats, diagno
 |----------|--------|------|-------------|
 | `/api/servers` | GET | User | List servers (paginated, filterable by type/status) |
 | `/api/servers/agent-compatibility-summary` | GET | User | Compatibility totals for the caller-visible fleet |
+| `/api/servers/filter-values` | GET | User | OS, agent versions and tags offered by the servers list's column filters |
 | `/api/servers/names` | GET | User | Server name list |
 | `/api/servers/{id}` | GET | User | Server detail |
 | `/api/servers/{id}` | PUT | User | Update server |
@@ -28,7 +29,6 @@ Fleet management for Linux and Windows servers: registration, heartbeats, diagno
 | `/api/servers/{id}/pipelines` | GET | User | Pipelines targeting server |
 | `/api/servers/{id}/variable-libraries` | GET | User | Variable libraries |
 | `/api/servers/{id}/vaults` | GET | User | Vaults linked to server |
-| `/api/servers/{id}/releases` | GET | User | Releases on server |
 | `/api/servers/{id}/services/action` | POST | User | Start/stop/restart a service |
 | `/api/servers/{id}/services/install` | POST | User | Install a service |
 | `/api/servers/{id}/services/uninstall` | POST | User | Uninstall a service |
@@ -42,6 +42,10 @@ Fleet management for Linux and Windows servers: registration, heartbeats, diagno
 | `/api/servers/{id}/firewall/toggle` | POST | User | Activer ou desactiver le pare-feu |
 | `/api/servers/{id}/tasks` | GET | User | Tasks for server (paginated) |
 | `/api/servers/{id}/logs` | GET | User | Task logs for server |
+| `/api/servers/{id}/ports/observe` | POST | User (Server Read) | Queue an on-demand scan of the listening ports (`ServerPortObservationController`) |
+| `/api/servers/{id}/ports/observed` | POST | AgentToken | Agent pushes what its port scan saw, scoped to the token's own server |
+
+The releases of a server (`/api/servers/{id}/releases` and its `filter-values`) are served by the Releases module (`ReleasesController`).
 
 ## Key Classes
 
@@ -55,9 +59,11 @@ Fleet management for Linux and Windows servers: registration, heartbeats, diagno
 - `IServerRepository` / `ServerRepository` -- EF data access
 - `ServerHeartbeatProcessor` / `ServerHeartbeatCapabilityProjector` -- heartbeat ingestion and capability projection
 - `ServerDiagnosticAnalyzer`, `ServerAgentContactProbe`, `ServerServiceManager` -- diagnostics, reachability, service control collaborators
+- `IServerRetirementService` / `ServerRetirementService` -- retire, list retired, permanently delete
+- `SudoersDriftMonitor` -- compares the sudoers fingerprint each heartbeat reports with the server's baseline; raises `SudoersDriftDetectedEvent` once per drifted state (fingerprint persisted on the server), then a reminder every 6 h while the drift persists (`Server.SudoersDriftAlertedAt`), and re-captures the baseline when a heartbeat confirms an agent update (recette R2-023). The event is audited and handled by `Handlers/SudoersDriftNotificationHandler`, which records a persistent notification for every active administrator and hands it to the `alert.triggered` notification rules
 - `ServerTimeoutService` (in `Services/`, outside this module) -- background: marks servers offline on heartbeat timeout
 
 ## Cross-Module Dependencies
 
-- Depends on: Audit, Auth (token renewal), AgentUpdate, Shared
+- Depends on: Audit, Auth (token renewal), AgentUpdate, Notifications (sudoers drift notifications), Tasks (agent task queueing), Shared
 - Depended on by: Projects, AgentUpdate, Apache/Docker/Teamspeak (via `ValidateServerExistsFilter`)

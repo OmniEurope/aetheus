@@ -20,7 +20,6 @@ public partial class ProjectQualitySection : ComponentBase, IAsyncDisposable
     /// <summary>Recette R-431: the project header's "..." menu, where the findings tab puts "Export all".</summary>
     [CascadingParameter] public Layout.ProjectSectionMenu? SectionMenu { get; set; }
 
-    private Func<Task>? _exportAction;
 
     private bool _loading = true;
     private ProjectQualityTrendDto _trend = new();
@@ -71,46 +70,6 @@ public partial class ProjectQualitySection : ComponentBase, IAsyncDisposable
 
     private string LastAnalysisText => _summary.LastAnalysisAt?.ToString("g") ?? L["Never"];
 
-    // Recette R-176: a domain with neither a measure nor a CRAP score is a compact line, not a card.
-    private static bool HasDetails(QualityDomainView domain) => domain.Measures.Count > 0 || domain.CrapScore.HasValue;
-
-    private string DomainState(QualityDomainView domain) =>
-        $"{(domain.Required ? L["AnalysisRequired"] : L["AnalysisAdvisory"])}"
-        + $" · {(domain.Completeness == AnalysisGradeCompleteness.Complete ? L["Complete"] : L["Incomplete"])}"
-        + $" · {L["AnalysisFreshness"]}: {domain.EvaluatedAt?.ToString("g") ?? L["NotAvailable"]}";
-    private IReadOnlyList<QualityDomainView> QualityDomains
-    {
-        get
-        {
-            var source = _summary.Grade?.Domains ?? [];
-            var result = new List<QualityDomainView>();
-            AddDomain(result, source, AnalysisGradeDomain.Security);
-
-            var codeAndTests = source
-                .Where(domain => domain.Domain is AnalysisGradeDomain.Reliability or AnalysisGradeDomain.CodeQuality)
-                .ToArray();
-            if (codeAndTests.Length > 0)
-            {
-                result.Add(new QualityDomainView(
-                    L["AnalysisCodeQualityAndTests"],
-                    WorstGrade(codeAndTests),
-                    codeAndTests.Any(domain => domain.Required),
-                    codeAndTests.Any(domain => domain.Completeness == AnalysisGradeCompleteness.Incomplete)
-                        ? AnalysisGradeCompleteness.Incomplete
-                        : AnalysisGradeCompleteness.Complete,
-                    codeAndTests.Where(domain => domain.EvaluatedAt.HasValue)
-                        .Select(domain => domain.EvaluatedAt)
-                        .Min(),
-                    codeAndTests.SelectMany(domain => domain.Measures).ToArray(),
-                    _complexity.LastOrDefault()?.Crap));
-            }
-
-            AddDomain(result, source, AnalysisGradeDomain.Architecture);
-            AddDomain(result, source, AnalysisGradeDomain.Performance);
-            return result;
-        }
-    }
-
     protected override async Task OnParametersSetAsync()
     {
         _qualitySectionIndex = QualitySectionIndexFromUri();
@@ -159,26 +118,10 @@ public partial class ProjectQualitySection : ComponentBase, IAsyncDisposable
     }
 
     /// <summary>
-    /// Recette R-431: on the findings tab, "Export all" is an entry of the project header's "..." menu
-    /// (disabled while there is nothing to export or an export runs); on the overview tab the menu
-    /// holds Follow and Edit only. The delegate is kept, so publishing the same state twice is a no-op.
+    /// Recette R2-054: the project header's "..." menu no longer holds "Export all" (R-431 had put it
+    /// there); it is the blue button under the findings table. The section publishes no action of its own.
     /// </summary>
-    private void PublishMenuActions()
-    {
-        if (SectionMenu is null) return;
-        if (_qualitySectionIndex != 1)
-        {
-            SectionMenu.Clear();
-            return;
-        }
-
-        _exportAction ??= ExportAllAiPromptAsync;
-        SectionMenu.Set(
-        [
-            new Layout.ProjectSectionMenuAction("download", L["AnalysisExportAllAiPrompt"], L["AnalysisExportAllAiPrompt"],
-                _findingCount == 0 || _exportingPrompt, _exportAction)
-        ]);
-    }
+    private void PublishMenuActions() => SectionMenu?.Clear();
 
     protected override void OnAfterRender(bool firstRender) => PublishMenuActions();
 
@@ -426,71 +369,15 @@ public partial class ProjectQualitySection : ComponentBase, IAsyncDisposable
             _findingIdRange.Not);
     }
 
-    private string DomainLabel(AnalysisGradeDomain? domain) => domain switch
-    {
-        AnalysisGradeDomain.Security => L["AnalysisApplicationSecurity"],
-        AnalysisGradeDomain.Reliability or AnalysisGradeDomain.CodeQuality => L["AnalysisCodeQualityAndTests"],
-        AnalysisGradeDomain.Architecture => L["AnalysisCodeArchitecture"],
-        AnalysisGradeDomain.Performance => L["AnalysisRuntimePerformance"],
-        _ => L["NotAvailable"]
-    };
-
-    private string MeasureLabel(string key) => key switch
-    {
-        "grade.security.critical" => L["AnalysisCriticalVulnerabilities"],
-        "grade.security.high" => L["AnalysisHighVulnerabilities"],
-        "grade.security.medium" => L["AnalysisMediumVulnerabilities"],
-        "grade.coverage.line" => L["AnalysisTestedLines"],
-        "grade.coverage.branch" => L["AnalysisTestedBranches"],
-        "grade.complexity.maximum" => L["AnalysisMaximumComplexity"],
-        "grade.duplication" => L["AnalysisDuplicatedCode"],
-        "grade.architecture.cycles" => L["AnalysisDependencyCycles"],
-        _ => key.StartsWith("grade.", StringComparison.OrdinalIgnoreCase)
-            ? key["grade.".Length..].Replace('.', ' ')
-            : key
-    };
-
     /// <summary>Recette R-430: the recorded commit's page; the commit page finds its repository. Null
     /// (plain text) when the project's history does not hold the commit.</summary>
     private string? GradeCommitHref => _summary.GradeCommitId is { } commitId
         ? $"/git-repositories/commits/{commitId}"
         : null;
 
-    private static string MeasureText(AnalysisGradeMeasureDto measure)
-    {
-        if (!measure.ObservedValue.HasValue) return "-";
-        var value = measure.ObservedValue.Value.ToString("0.##");
-        if (string.Equals(measure.Unit, "percent", StringComparison.OrdinalIgnoreCase)) return $"{value} %";
-        return string.IsNullOrWhiteSpace(measure.Unit) ? value : $"{value} {measure.Unit}";
-    }
-
-    private void AddDomain(
-        ICollection<QualityDomainView> target,
-        IReadOnlyList<AnalysisGradeDomainDto> source,
-        AnalysisGradeDomain domain)
-    {
-        var item = source.FirstOrDefault(candidate => candidate.Domain == domain);
-        if (item is null) return;
-        target.Add(new QualityDomainView(
-            DomainLabel(domain), item.Grade, item.Required, item.Completeness, item.EvaluatedAt, item.Measures, null));
-    }
-
-    private static AnalysisGrade? WorstGrade(IEnumerable<AnalysisGradeDomainDto> domains) =>
-        domains.Where(domain => domain.Grade.HasValue)
-            .Select(domain => domain.Grade)
-            .Max();
-
     private sealed record CoveragePoint(string Label, double LinePct, double BranchPct);
     private sealed record TestPoint(string Label, int Passed, int Failed);
     private sealed record ComplexityPoint(string Label, double Crap, double AvgCc);
-    private sealed record QualityDomainView(
-        string Label,
-        AnalysisGrade? Grade,
-        bool Required,
-        AnalysisGradeCompleteness Completeness,
-        DateTime? EvaluatedAt,
-        IReadOnlyList<AnalysisGradeMeasureDto> Measures,
-        double? CrapScore);
 
     public async ValueTask DisposeAsync()
     {

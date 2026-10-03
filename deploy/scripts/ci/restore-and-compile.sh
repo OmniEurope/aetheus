@@ -45,6 +45,10 @@ NODE="$(sh deploy/scripts/ensure-node-runtime.sh)"
   deploy/scripts/ensure-tls-certificates.test.mjs \
   deploy/scripts/reconcile-env-urls.test.mjs \
   deploy/scripts/export-public-distribution.test.mjs \
+  deploy/scripts/bluegreen-host-reset.test.mjs \
+  deploy/scripts/demo-public-source.test.mjs \
+  deploy/scripts/nightly-demo-evidence.test.mjs \
+  deploy/scripts/record-storage-evidence.test.mjs \
   deploy/scripts/app-version.test.mjs
 # AetheusRoslynSarif makes every project write what its analyzers found as SARIF 2.1. It is a build
 # flag rather than a separate analysis pass because the analyzers already ran: asking for the report

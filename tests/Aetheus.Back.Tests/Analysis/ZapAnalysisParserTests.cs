@@ -37,6 +37,40 @@ public sealed class ZapAnalysisParserTests
     }
 
     [Fact]
+    public void Parse_KeepsEachVariantOfARuleApart()
+    {
+        // Finding 870 (2026-10-03): every CSP variant at "/" shared one finding, titled after the first.
+        const string json = """
+            {"site":[{"alerts":[
+              {"pluginid":"10055","alertRef":"10055-6","alert":"CSP: style-src unsafe-inline","riskcode":"2","cweid":"693","instances":[{"uri":"http://127.0.0.1:24001/","method":"GET","param":"Content-Security-Policy"}]},
+              {"pluginid":"10055","alertRef":"10055-4","alert":"CSP: Wildcard Directive","riskcode":"2","cweid":"693","instances":[{"uri":"http://127.0.0.1:24001/","method":"GET","param":"Content-Security-Policy"}]}
+            ]}]}
+            """;
+
+        var findings = ZapAnalysisParser.Parse(json);
+
+        Assert.Equal(2, findings.Select(finding => finding.Fingerprint).Distinct().Count());
+        Assert.Equal(["10055-6", "10055-4"], findings.Select(finding => finding.RuleId));
+        Assert.Equal(["CSP: style-src unsafe-inline", "CSP: Wildcard Directive"], findings.Select(finding => finding.Title));
+    }
+
+    [Fact]
+    public void Parse_KeepsTheFingerprintOfAnAlertWithoutVariant()
+    {
+        // Triage already recorded on plain alerts survives: alertRef equal to the plugin id changes nothing.
+        const string withoutRef = """
+            {"site":[{"alerts":[{"pluginid":"10021","alert":"X-Content-Type-Options Header Missing","riskcode":"1","cweid":"693","instances":[{"uri":"https://qa.example.test/app.js","method":"GET","param":"x-content-type-options"}]}]}]}
+            """;
+        var withRef = withoutRef.Replace("\"pluginid\":\"10021\"", "\"pluginid\":\"10021\",\"alertRef\":\"10021\"", StringComparison.Ordinal);
+
+        var before = Assert.Single(ZapAnalysisParser.Parse(withoutRef));
+        var after = Assert.Single(ZapAnalysisParser.Parse(withRef));
+
+        Assert.Equal(before.Fingerprint, after.Fingerprint);
+        Assert.Equal("10021", after.RuleId);
+    }
+
+    [Fact]
     public void Parse_DropsWeakTransportWarningOnlyForLoopbackHttpQa()
     {
         const string json = """

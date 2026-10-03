@@ -8,9 +8,16 @@ public sealed class SecretExpirationService(
     IServiceScopeFactory scopeFactory,
     IConfiguration configuration,
     ILogger<SecretExpirationService> logger,
-    TimeProvider timeProvider) : BackgroundService
+    TimeProvider timeProvider,
+    IPostgresLeaderLease? leaderLease = null) : BackgroundService
 {
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    // Only the live colour runs it (decision of 2026-10-02, PostgresLeaderLease).
+    protected override Task ExecuteAsync(CancellationToken stoppingToken) =>
+        leaderLease is null
+            ? RunLeaderLoopAsync(stoppingToken)
+            : leaderLease.RunAsLeaderAsync("aetheus:secret-expiration", RunLeaderLoopAsync, stoppingToken);
+
+    private async Task RunLeaderLoopAsync(CancellationToken stoppingToken)
     {
         // Hardening (#51): scan once at startup so a service restart does not extend the
         // detection window by up to 6 h. After that, the periodic timer takes over.

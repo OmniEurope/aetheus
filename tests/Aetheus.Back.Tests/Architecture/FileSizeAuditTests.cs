@@ -1,99 +1,121 @@
+// kit-model FileSizeAuditTests 2
 // SPDX-License-Identifier: EUPL-1.2
+//
+// Guard test for rule STD-FILESIZE (docs/code-rules.md): a production .cs, .razor or .js file stays
+// within 600 effective lines, so large services and components are decomposed into real collaborator
+// types before they turn into god files. Blank lines and comments are not counted: documenting a file
+// never costs it its budget. Same counting as the kit's verify-rules.ps1.
+//
+// Copy as is into a test project (xUnit) with RepositoryScan.cs and adjust only the namespace. The
+// production projects are discovered, never listed: every file under the repository's src/ folder is
+// in scope, so a new project is covered the day it is created.
+// Keep the first line of this file in the copy: it tells the kit's verify-rules.ps1 which version of
+// the model the copy implements (STD-KITCOPY).
+//
+// When this fails, extract a real collaborator class with its own name and responsibility. Never
+// split a class across Foo.X.cs partial files to dodge the budget (STD-PARTIAL). A whitelist entry
+// is a policy exception that requires the user's explicit approval, with its justification comment.
+
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using Xunit;
+
 namespace Aetheus.Back.Tests.Architecture;
 
-/// <summary>
-/// Architectural guard: keeps the size of production C# files under control so that large
-/// services and components are decomposed into real collaborator types before they grow unwieldy.
-///
-/// Threshold: <see cref="MaxLines"/> physical lines per file. The whitelist below documents
-/// files that are deliberately allowed to exceed the threshold (typically generated artefacts
-/// or central registration tables); add new entries with a justification comment.
-///
-/// When this test fails, prefer one of:
-/// <list type="bullet">
-///   <item>extracting a real collaborator class with its own name and responsibility
-///         (e.g. <c>ServerHeartbeatService</c>), wired through DI - NOT a <c>partial</c> split,</item>
-///   <item>moving cohesive helpers to a sibling type,</item>
-///   <item>only as a last resort, adding the file to the whitelist with a comment.</item>
-/// </list>
-/// Do NOT split a class across <c>Foo.X.cs</c> <c>partial</c> files purely to dodge this budget:
-/// <c>partial</c> is reserved for framework/generator needs (EF, Blazor code-behind, source
-/// generators, the integration-test <c>Program</c> shim). See CLAUDE.md "Interdictions".
-/// </summary>
-public class FileSizeAuditTests
+public sealed class FileSizeAuditTests
 {
     private const int MaxLines = 600;
 
-    /// <summary>
-    /// Files that may legitimately exceed <see cref="MaxLines"/>. Justify every entry.
-    /// Paths are repo-relative, forward slashes, case-insensitive.
-    ///
-    /// EMPTY, and meant to stay that way. The last entry was PipelineRunService, exempted in 2026-06
-    /// on the grounds that its trigger → stage-advancement → task-creation cycle could not be split
-    /// without "a callback redesign that risks the core CI/CD path". That redesign was done in
-    /// 2026-08: the recursion is closed by passing IPipelineChildRunLauncher as a method parameter
-    /// instead of injecting it, and the engine is now sixteen collaborators, all under budget.
-    /// </summary>
+    // Repo-relative paths, forward slashes, allowed above MaxLines. Every entry carries a
+    // justification comment. Empty, and meant to stay that way.
     private static readonly HashSet<string> Whitelist = new(StringComparer.OrdinalIgnoreCase);
+
+    private static readonly string[] Patterns = ["*.cs", "*.razor", "*.js"];
 
     [Fact]
     public void NoProductionFile_ExceedsLineBudget()
     {
-        var repoRoot = FindRepoRoot();
-        var projectDirs = new[]
-        {
-            Path.Combine(repoRoot, "src", "Aetheus.Back"),
-            Path.Combine(repoRoot, "src", "Aetheus.Front"),
-            Path.Combine(repoRoot, "src", "Aetheus.Shared"),
-            Path.Combine(repoRoot, "src", "Aetheus.Agent.Core"),
-            Path.Combine(repoRoot, "src", "Aetheus.Agent.Linux"),
-            Path.Combine(repoRoot, "src", "Aetheus.Agent.Windows"),
-            Path.Combine(repoRoot, "src", "Aetheus.Cli"),
-        };
+        var source = Path.Combine(RepositoryScan.Root, "src");
+        var files = Patterns
+            .SelectMany(pattern => RepositoryScan.EnumerateOptional(source, pattern))
+            .Where(file => !IsOutOfScope(file))
+            .ToList();
+        Assert.True(files.Count > 0, $"No production file found under {source}: the guard would pass vacuously.");
 
-        var offenders = new List<(string RelPath, int Lines)>();
+        var offenders = files
+            .Select(file => (
+                Path: Path.GetRelativePath(RepositoryScan.Root, file).Replace('\\', '/'),
+                Lines: EffectiveLines(File.ReadAllLines(file), markup: Path.GetExtension(file).Equals(".razor", StringComparison.OrdinalIgnoreCase))))
+            .Where(file => file.Lines > MaxLines && !Whitelist.Contains(file.Path))
+            .OrderByDescending(file => file.Lines)
+            .ToList();
 
-        // A360-75: .razor used to be outside this guard, which is how PipelineRun.razor reached 608
-        // lines with nothing turning red. The budget applies to a component exactly as it does to a
-        // class - a 600-line page is a god file whatever its extension - so the scan now covers both.
-        // Closing it required extracting PipelineRunAiResultsCard from that page first; the whitelist
-        // stays empty.
-        foreach (var dir in projectDirs.Where(Directory.Exists))
+        Assert.True(
+            offenders.Count == 0,
+            $"STD-FILESIZE: these production files exceed {MaxLines} effective lines; extract real collaborators, never partials:{Environment.NewLine}"
+            + string.Join(Environment.NewLine, offenders.Select(file => $"  - {file.Path} ({file.Lines} effective lines)")));
+    }
+
+    // The effective lines of a file: every line that holds something other than a comment. A blank line
+    // and a line that is only a comment (// and ///, a /* */ block, and in a .razor file an @* *@ or
+    // <!-- --> block as well) are not counted; code followed by a comment is. A block is recognised
+    // where it opens a line, so a "/*" inside a string literal never starts one.
+    private static int EffectiveLines(string[] lines, bool markup)
+    {
+        (string Open, string Close)[] blocks = markup
+            ? [("/*", "*/"), ("@*", "*@"), ("<!--", "-->")]
+            : [("/*", "*/")];
+        var count = 0;
+        string? closer = null;
+        foreach (var line in lines)
         {
-            foreach (var file in RepositoryScan.Enumerate(dir, "*.cs")
-                         .Concat(EnumerateRazorFiles(dir)))
+            var rest = line.Trim();
+            while (true)
             {
-                // Skip build outputs and tooling artefacts.
-                if (file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase)) continue;
-                if (file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase)) continue;
-                // EF Core migrations are auto-generated.
-                if (file.Contains($"{Path.DirectorySeparatorChar}Migrations{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase)) continue;
+                if (closer is not null)
+                {
+                    var end = rest.IndexOf(closer, StringComparison.Ordinal);
+                    if (end < 0)
+                    {
+                        rest = string.Empty;
+                        break;
+                    }
 
-                var lineCount = File.ReadAllLines(file).Length;
-                if (lineCount <= MaxLines) continue;
+                    rest = rest[(end + closer.Length)..].TrimStart();
+                    closer = null;
+                }
 
-                var rel = Path.GetRelativePath(repoRoot, file).Replace('\\', '/');
-                if (Whitelist.Contains(rel)) continue;
+                var block = blocks.FirstOrDefault(candidate => rest.StartsWith(candidate.Open, StringComparison.Ordinal));
+                if (block.Open is null)
+                {
+                    break;
+                }
 
-                offenders.Add((rel, lineCount));
+                closer = block.Close;
+                rest = rest[block.Open.Length..];
+            }
+
+            if (rest.Length > 0 && !rest.StartsWith("//", StringComparison.Ordinal))
+            {
+                count++;
             }
         }
 
-        Assert.True(offenders.Count == 0,
-            $"The following production files exceed {MaxLines} lines. Extract real collaborators " +
-            $"or whitelist with justification:{Environment.NewLine}" +
-            string.Join(Environment.NewLine, offenders.OrderByDescending(o => o.Lines).Select(o => $"  - {o.RelPath} ({o.Lines} lines)")));
+        return count;
     }
 
-    /// <summary>
-    /// Razor components, where present. Unlike the .cs scan this tolerates an empty result on purpose:
-    /// only the front project has .razor files, so demanding a floor here would fail on every backend
-    /// project for the wrong reason.
-    /// </summary>
-    private static IEnumerable<string> EnumerateRazorFiles(string directory) =>
-        Directory.Exists(directory)
-            ? Directory.EnumerateFiles(directory, "*.razor", SearchOption.AllDirectories)
-            : [];
-
-    private static string FindRepoRoot() => Aetheus.Back.Tests.Architecture.RepositoryScan.Root;
+    // Generated code (EF migrations, designers, source generators) and vendored or minified scripts:
+    // their size is not a design signal.
+    private static bool IsOutOfScope(string file)
+    {
+        var separator = Path.DirectorySeparatorChar;
+        var name = Path.GetFileName(file);
+        return file.Contains($"{separator}Migrations{separator}", StringComparison.OrdinalIgnoreCase)
+            || file.Contains($"{separator}wwwroot{separator}lib{separator}", StringComparison.OrdinalIgnoreCase)
+            || name.EndsWith(".Designer.cs", StringComparison.OrdinalIgnoreCase)
+            || name.EndsWith(".g.cs", StringComparison.OrdinalIgnoreCase)
+            || name.EndsWith(".min.js", StringComparison.OrdinalIgnoreCase);
+    }
 }

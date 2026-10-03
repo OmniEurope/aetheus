@@ -57,14 +57,11 @@ public sealed class PipelineBranchAdvanceStep(
                     "AdvancedBranchAfterDeploy", "Release", release.Id,
                     $"{target.Branch} -> {commit} in {result.RepositorySlug} (run {runId}, was {result.PreviousSha ?? "absent"})",
                     ct).ConfigureAwait(false);
-                await SucceedAsync(runId, stepRun,
-                    $"'{target.Branch}' advanced from {Short(result.PreviousSha) ?? "(new branch)"} to {Short(commit)} "
-                    + $"(release {release.Version}, repository {result.RepositorySlug}).", ct).ConfigureAwait(false);
+                Succeed(stepRun, $"'{target.Branch}' advanced from {Short(result.PreviousSha) ?? "(new branch)"} to {Short(commit)} "
+                    + $"(release {release.Version}, repository {result.RepositorySlug}).");
                 return;
             case GitBranchAdvanceOutcome.AlreadyUpToDate:
-                await SucceedAsync(runId, stepRun,
-                    $"'{target.Branch}' already points at {Short(commit)} (release {release.Version}); nothing to advance.",
-                    ct).ConfigureAwait(false);
+                Succeed(stepRun, $"'{target.Branch}' already points at {Short(commit)} (release {release.Version}); nothing to advance.");
                 return;
             case GitBranchAdvanceOutcome.NotFastForward:
                 await FailAsync(runId, stepRun,
@@ -115,16 +112,22 @@ public sealed class PipelineBranchAdvanceStep(
         return new AdvanceTarget(project, branch, release, null);
     }
 
-    private async Task SucceedAsync(int runId, PipelineStepRun stepRun, string message, CancellationToken ct)
+    private void Succeed(PipelineStepRun stepRun, string message)
     {
         var now = timeProvider.GetUtcNow().UtcDateTime;
         stepRun.Status = TaskExecutionStatus.Success;
         stepRun.ExitCode = 0;
         stepRun.StartedAt ??= now;
         stepRun.CompletedAt = now;
-        await pipelines.AppendRunWarningsAsync(
-            runId, [$"Advance branch step '{stepRun.StepName}': {message}"], ct).ConfigureAwait(false);
+        // Recette R2-071: an advance that worked is the expected outcome of a delivery, not a warning.
+        // It was appended to the run's warnings and shown in the yellow banner, which read as an error.
+        // It stays on the step, as its output, and in the audit log.
+        stepRun.OutputVariablesJson = System.Text.Json.JsonSerializer.Serialize(
+            new Dictionary<string, string> { [OutcomeOutput] = message });
     }
+
+    /// <summary>The step output that carries what the advance did.</summary>
+    internal const string OutcomeOutput = "BRANCH_ADVANCE";
 
     private async Task FailAsync(int runId, PipelineStepRun stepRun, string reason, CancellationToken ct)
     {

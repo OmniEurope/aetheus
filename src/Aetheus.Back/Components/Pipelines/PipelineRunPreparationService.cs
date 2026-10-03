@@ -86,6 +86,10 @@ public sealed class PipelineRunPreparationService(
             pipeline, effectiveProjectId, branch, commitHash, yamlOverride, source is null, ct).ConfigureAwait(false);
         // Recette R2-041: keys this backend does not know are skipped by the parser; the run says so.
         var definitionWarnings = PipelineYamlDiagnostics.UnknownPropertyWarnings(definitionYaml, logger);
+        // A misspelled known key (a guard such as approval_timeout_minutes) is refused, never skipped.
+        var nearMissKeys = PipelineYamlDiagnostics.NearMissKeyErrors(definitionYaml, logger);
+        if (nearMissKeys.Count > 0)
+            throw new BadRequestException(string.Join(" ", nearMissKeys));
         var organizationId = await repo.GetPipelineOrganizationIdAsync(id, ct).ConfigureAwait(false);
         var resolution = await templateResolver.ResolveAsync(definitionYaml, organizationId ?? 0, parameters: null, ct)
             .ConfigureAwait(false);

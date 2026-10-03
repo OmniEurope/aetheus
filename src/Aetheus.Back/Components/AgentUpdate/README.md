@@ -21,6 +21,9 @@ Orchestre la disponibilité et la livraison des mises à jour d’agent.
 - `AgentUpdateRepository` persiste `AgentUpdateRequest`; le coordinateur traite
   la file et `AgentUpdateConfirmationService` confirme uniquement depuis le
   heartbeat d’une nouvelle session.
+- `AgentUpdateNotificationPublisher` (recette R2-034) notifie l’issue d’une mise à jour
+  (`agent-update.completed` à la confirmation, `agent-update.failed` à l’échec) aux abonnés
+  des projets du serveur, en notifications utilisateur uniquement.
 
 ## Garanties
 

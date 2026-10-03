@@ -77,10 +77,12 @@ public class AppDbContext(
     public DbSet<EnvironmentServer> EnvironmentServers => Set<EnvironmentServer>();
     public DbSet<EnvironmentProjectServer> EnvironmentProjectServers => Set<EnvironmentProjectServer>();
     public DbSet<PipelineApproval> PipelineApprovals => Set<PipelineApproval>();
+    public DbSet<PipelineResourceLock> PipelineResourceLocks => Set<PipelineResourceLock>();
     public DbSet<AgentPool> AgentPools => Set<AgentPool>();
     public DbSet<AgentPoolServer> AgentPoolServers => Set<AgentPoolServer>();
     public DbSet<PipelineArtifact> PipelineArtifacts => Set<PipelineArtifact>();
     public DbSet<PipelineRunArtifactInput> PipelineRunArtifactInputs => Set<PipelineRunArtifactInput>();
+    public DbSet<ArtifactStorageMeasurement> ArtifactStorageMeasurements => Set<ArtifactStorageMeasurement>();
     public DbSet<NotificationChannel> NotificationChannels => Set<NotificationChannel>();
     public DbSet<NotificationRule> NotificationRules => Set<NotificationRule>();
     public DbSet<NotificationDelivery> NotificationDeliveries => Set<NotificationDelivery>();
@@ -144,6 +146,7 @@ public class AppDbContext(
     public DbSet<AppAnalyticsAggregate> AppAnalyticsAggregates => Set<AppAnalyticsAggregate>();
     public DbSet<AppAnalyticsPageAggregate> AppAnalyticsPageAggregates => Set<AppAnalyticsPageAggregate>();
     public DbSet<AppAnalyticsRejection> AppAnalyticsRejections => Set<AppAnalyticsRejection>();
+    public DbSet<AppAnalyticsIngestVolume> AppAnalyticsIngestVolumes => Set<AppAnalyticsIngestVolume>();
     public DbSet<RegistryPackage> RegistryPackages => Set<RegistryPackage>();
     public DbSet<RegistryPackageVersion> RegistryPackageVersions => Set<RegistryPackageVersion>();
     public DbSet<AiRunnerProfile> AiRunnerProfiles => Set<AiRunnerProfile>();

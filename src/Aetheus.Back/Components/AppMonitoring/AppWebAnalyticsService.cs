@@ -88,8 +88,11 @@ public sealed class AppWebAnalyticsService(
 
             // Recette R2-007: the audience rolls instead of refusing. At the budget, the oldest raw rows of
             // the app go until it is back under RollTargetPercent of it, and the batch is accepted.
-            if (storageBytes >= budgetBytes)
-                await RollAsync(appId, budgetBytes, ct).ConfigureAwait(false);
+            // Audit follow-up: only under the rolling-hour volume cap. Past it the anonymous ingest is a
+            // flood that would erase the app's history, so the batch is refused and nothing is deleted.
+            if (storageBytes >= budgetBytes
+                && await RefuseFloodOrRollAsync(app, capped.Count, budgetBytes, now, ct).ConfigureAwait(false))
+                return new WebAnalyticsIngestOutcome(0, 0, rejected + capped.Count);
 
             var sessionTimeout = Math.Clamp(
                 configuration.GetValue(
@@ -143,6 +146,46 @@ public sealed class AppWebAnalyticsService(
 
     /// <summary>Recette R2-007: the share of its budget an app is brought back under when it reaches it.</summary>
     internal const int RollTargetPercent = 90;
+
+    /// <summary>
+    /// Audit R2-007 follow-up, for an app at its budget: refuses the batch as a flood (reason
+    /// <c>flood</c>, nothing deleted) when it would take the app past its rolling-hour cap, and
+    /// otherwise rolls the oldest rows off so the batch is accepted. Returns whether it was refused.
+    /// </summary>
+    private async Task<bool> RefuseFloodOrRollAsync(
+        Aetheus.Back.Data.Entities.MonitoredApp app,
+        int batchSize,
+        long budgetBytes,
+        DateTime now,
+        CancellationToken ct)
+    {
+        if (batchSize > 0 && await ExceedsRollingCapAsync(app.Id, batchSize, now, ct).ConfigureAwait(false))
+        {
+            app.AnalyticsRejectedCount += batchSize;
+            await repository.RecordRejectionAsync(app.Id, "flood", batchSize, now, ct).ConfigureAwait(false);
+            await apps.SaveChangesAsync(ct).ConfigureAwait(false);
+            return true;
+        }
+        await RollAsync(app.Id, budgetBytes, ct).ConfigureAwait(false);
+        return false;
+    }
+
+    /// <summary>
+    /// Audit R2-007 follow-up: whether accepting <paramref name="batchSize"/> more events would take the
+    /// app past its rolling-hour cap. The hour is read from the volumes the batches saved in the shared
+    /// database, so both blue-green colours count against the same cap.
+    /// </summary>
+    private async Task<bool> ExceedsRollingCapAsync(int appId, int batchSize, DateTime now, CancellationToken ct)
+    {
+        var cap = Math.Clamp(
+            configuration.GetValue(
+                "AppMonitoring:Analytics:RollingEventsPerHour",
+                AppMonitoringDefaults.DefaultAnalyticsRollingEventsPerHour),
+            AppMonitoringDefaults.MinimumAnalyticsRollingEventsPerHour,
+            AppMonitoringDefaults.MaximumAnalyticsRollingEventsPerHour);
+        var lastHour = await repository.CountAcceptedSinceAsync(appId, now.AddHours(-1), ct).ConfigureAwait(false);
+        return (long)lastHour + batchSize > cap;
+    }
 
     private static long BudgetOf(long configuredBytes) => configuredBytes > 0
         ? configuredBytes

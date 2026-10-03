@@ -31,7 +31,7 @@ else
             <OmniAlert Severity="OmniSeverity.Danger" Title="@L["RunBlockedTitle"]" Class="omni-u-mt-sm">
             @foreach (var item in BlockingWarningViews)
             {
-                <div>
+                <div class="run-warning-line">
                     @item.Message
                     @if (item.ConfigHref is not null)
                     {
@@ -44,7 +44,7 @@ else
     @if (InfoWarnings.Count > 0)
     {
         <OmniAlert Severity="OmniSeverity.Warning" Class="omni-u-mt-sm"><Icon><OmniIcon Name="OmniIconName.Warning" /></Icon><ChildContent>
-            @foreach (var warning in InfoWarnings) { <div>@warning</div> }
+            @foreach (var warning in InfoWarnings) { <div class="run-warning-line">@warning</div> }
         </ChildContent></OmniAlert>
     }
     @if (_run.CancellationRequested && RunInProgress)
@@ -197,7 +197,7 @@ else
                                             @* Recette R-340: a single artifact reads by its name, several by their count. *@
                                             @if (_run.Artifacts.Count == 1)
                                             {
-                                                <span class="run-tile-value" title="@_run.Artifacts[0].Name">@_run.Artifacts[0].Name</span>
+                                                <span class="run-tile-value run-artifact-name" title="@_run.Artifacts[0].Name">@_run.Artifacts[0].Name</span>
                                             }
                                             else
                                             {

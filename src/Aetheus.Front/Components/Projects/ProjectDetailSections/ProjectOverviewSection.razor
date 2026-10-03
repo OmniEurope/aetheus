@@ -78,6 +78,8 @@ else
                                 <OmniDescriptionItem Label="@($"{L["Status"]} · {L["AnalysisGrade"]}")">
                                     <Icon><OmniIcon Name="OmniIconName.Broadcast" /></Icon>
                                     <ChildContent>
+                                        @* Recette R2-051: the status and the grade were one space apart. *@
+                                        <OmniStack Orientation="OmniStackOrientation.Horizontal" Align="OmniAlignment.Center" Gap="OmniSpacing.Small" Class="project-status-grade">
                                         <OmniBadge Fill="OmniFill.Solid" Tone="@(Project.Status == ProjectStatus.Active ? OmniTone.Success : OmniTone.Neutral)">@L[Project.Status.ToString()]</OmniBadge>
                                         @* Recette R2-024: the grade of the latest candidate run, which it opens; the
                                            quality page when no run has been graded yet. *@
@@ -95,6 +97,7 @@ else
                                                 <GradeBadge Value="@Project.LatestGateGrade" />
                                             </a>
                                         }
+                                        </OmniStack>
                                     </ChildContent>
                                 </OmniDescriptionItem>
                                 <OmniDescriptionItem Label="@($"{L["Created"]} · {L["Updated"]}")">

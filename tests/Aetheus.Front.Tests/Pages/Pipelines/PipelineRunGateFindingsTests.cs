@@ -35,6 +35,42 @@ public sealed class PipelineRunGateFindingsTests : BunitContext
     }
 
     [Fact]
+    public void R2_052_AGradeWithoutFindings_SaysWhichMeasureMadeIt()
+    {
+        // Run 2491: a B over "0 findings". The B came from a metric measure, now listed with its value.
+        var gate = new AnalysisRunGateDto
+        {
+            PipelineRunId = 2491,
+            Grade = new AnalysisGradeSummaryDto
+            {
+                OverallGrade = AnalysisGrade.B,
+                Completeness = AnalysisGradeCompleteness.Complete,
+                LimitingDomain = AnalysisGradeDomain.CodeQuality,
+                Domains =
+                [
+                    new AnalysisGradeDomainDto
+                    {
+                        Domain = AnalysisGradeDomain.CodeQuality,
+                        Grade = AnalysisGrade.B,
+                        Required = true,
+                        Completeness = AnalysisGradeCompleteness.Complete,
+                        Measures = [new AnalysisGradeMeasureDto { Key = "grade.coverage.line", Grade = AnalysisGrade.B, ObservedValue = 72.4, Unit = "percent" }]
+                    }
+                ]
+            }
+        };
+        ServeFindings(gate);
+
+        var cut = Render<PipelineRunGateFindings>(parameters => parameters.Add(component => component.Gate, gate));
+
+        Assert.Contains("AnalysisLimitingDomain: AnalysisCodeQualityAndTests", cut.Find(".analysis-grade-limiting").TextContent, StringComparison.Ordinal);
+        var measure = Assert.Single(cut.FindAll(".analysis-grade-measure"));
+        Assert.Contains("AnalysisTestedLines", measure.TextContent, StringComparison.Ordinal);
+        Assert.Contains("72.4 %", measure.TextContent.Replace(',', '.'), StringComparison.Ordinal);
+        Assert.Contains("grade-badge--b", measure.InnerHtml, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void R527_DecidedFindings_AreHiddenUntilAskedFor()
     {
         var gate = new AnalysisRunGateDto
@@ -88,7 +124,8 @@ public sealed class PipelineRunGateFindingsTests : BunitContext
         // Recette R-485: read from the server page by page, as the project's Quality list.
         Assert.False(columns.Instance.LocalData);
         Assert.Contains("#1094", cut.Markup);
-        Assert.Contains("folder is not defined", cut.Find(".analysis-finding-grid-message").TextContent);
+        // Recette R2-053: one line per cell, the message behind the title on hover.
+        Assert.Contains("folder is not defined", cut.Find(".analysis-finding-grid-title").GetAttribute("title"));
         Assert.Contains("tests/security-rules/aetheus-security.py", cut.Find(".analysis-finding-location").TextContent);
         Assert.Contains("AnalysisGateNewBadge", cut.Find("tbody").TextContent);
 

@@ -1,12 +1,21 @@
 // SPDX-License-Identifier: EUPL-1.2
+using Aetheus.Back.Services;
+
 namespace Aetheus.Back.Components.PackageRegistry;
 
 internal sealed class PackageRegistryStorageReconciler(
     IServiceScopeFactory scopeFactory,
     TimeProvider timeProvider,
-    ILogger<PackageRegistryStorageReconciler> logger) : BackgroundService
+    ILogger<PackageRegistryStorageReconciler> logger,
+    IPostgresLeaderLease? leaderLease = null) : BackgroundService
 {
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    // Only the live colour runs it (decision of 2026-10-02, PostgresLeaderLease).
+    protected override Task ExecuteAsync(CancellationToken stoppingToken) =>
+        leaderLease is null
+            ? RunLeaderLoopAsync(stoppingToken)
+            : leaderLease.RunAsLeaderAsync("aetheus:package-registry-storage", RunLeaderLoopAsync, stoppingToken);
+
+    private async Task RunLeaderLoopAsync(CancellationToken stoppingToken)
     {
         await ReconcileOnceAsync(stoppingToken).ConfigureAwait(false);
         using var timer = new PeriodicTimer(TimeSpan.FromHours(1));

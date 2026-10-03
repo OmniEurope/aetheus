@@ -2670,6 +2670,36 @@ public class PipelineRunServiceTests
     }
 
     [Fact]
+    public async Task AdvanceStageAsync_AStepTypeThisBackendDoesNotKnow_FailsByName_WithoutAnAgentTask()
+    {
+        // Recette R2-041: a type written for a newer backend validates with a warning; when it runs on
+        // this one it fails visibly instead of reaching an agent as an empty command.
+        var yaml = """
+            name: deploy
+            trigger: manual
+            stages:
+              - name: build
+                agent: linux-01
+                steps:
+                  - name: compile
+                    shell: dotnet build
+              - name: Future
+                agent: linux-01
+                steps:
+                  - name: Future step
+                    type: publish-to-the-moon
+            """;
+        var stepRun = new PipelineStepRun { Id = 2, StageName = "Future", StepName = "Future step", PipelineRunId = 1 };
+        ArrangeAdvanceToStage(yaml, "Future", stepRun);
+
+        await _sut.AdvanceStageAsync(1, "build", ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal(TaskExecutionStatus.Failed, stepRun.Status);
+        Assert.Contains("publish-to-the-moon", stepRun.FailureReason, StringComparison.Ordinal);
+        _repoMock.DidNotReceive().TrackTask(Arg.Is<ServerTask>(task => task.PipelineStepRunId == 2));
+    }
+
+    [Fact]
     public async Task AdvanceStageAsync_AdvanceBranchStep_RunsInTheBackend_WithoutAnAgentTask()
     {
         // Recette R2-001: the branch is moved by the backend, which hosts the repository; no agent task

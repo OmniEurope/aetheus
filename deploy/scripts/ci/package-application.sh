@@ -30,26 +30,16 @@ test "$COMMIT" = "${BUILD_SOURCEVERSION:-}" || {
 }
 RUN_ID="${BUILD_BUILDID:-}"
 case "$RUN_ID" in ''|*[!0-9]*) echo "Invalid BUILD_BUILDID."; exit 1 ;; esac
-# Cache cohorts and the NuGet path keep the globally unique run id above. The application
-# version instead uses the per-pipeline counter so it increments by exactly one per build.
+# The application version ends with the globally unique run id of the build, like every other
+# build of the application (recette R2-076, user decision of 2026-10-03). The per-pipeline counter
+# gave the CI 1.2.402 while release-fast and the deployment counted on their own: the agents built
+# here and the site never carried the same version, and a release-fast build fell below the agents
+# already installed, which were then never offered its update.
 #
-# The counter is served by the backend, and the backend reaches production through this very
-# pipeline, so requiring it outright deadlocks: a control plane that predates the feature
-# cannot build the release that introduces it. Fall back to the run id, which every version
-# provides, and let the counter take over by itself once a control plane carrying it serves
-# this pipeline.
-BUILD_NUMBER="${BUILD_PIPELINE_RUNNUMBER:-}"
-case "$BUILD_NUMBER" in
-  ''|0)
-    BUILD_NUMBER="$RUN_ID"
-    echo "Per-pipeline build counter unavailable on this control plane; using run id $RUN_ID."
-    ;;
-  *[!0-9]*) echo "Invalid BUILD_PIPELINE_RUNNUMBER."; exit 1 ;;
-esac
 # The code's major.minor, from Directory.Build.props through the one script that composes versions:
 # this used to be a literal "1.1." here, a third copy beside that file and the library entry.
 # No suffix: the CI packages what a release is built from, not an environment's build.
-APP_VERSION="$(env VERSION_SUFFIX= sh deploy/scripts/app-version.sh "$BUILD_NUMBER")"
+APP_VERSION="$(env VERSION_SUFFIX= sh deploy/scripts/app-version.sh "$RUN_ID")"
 PACKAGE_DIR="$WORKSPACE/.pipeline-artifacts"
 rm -rf "$PACKAGE_DIR"
 mkdir -p "$PACKAGE_DIR"

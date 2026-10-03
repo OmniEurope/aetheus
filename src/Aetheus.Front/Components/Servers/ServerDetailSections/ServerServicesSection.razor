@@ -103,7 +103,7 @@
                         </OmniDataGridColumn>
                         <OmniDataGridColumn TItem="ServiceInfoDto" Property="IsRunning" Title="@L["Running"]" Width="6.25rem" Sortable="false" Filterable="true" FilterType="OmniDataGridColumnFilterType.Select" FilterValues="@GridFilterText.Booleans" FormatFilterValue="@YesNoText">
                             <Template Context="svc">
-                                <OmniBadge Fill="OmniFill.Solid" Tone="@(svc.IsRunning ? OmniTone.Success : OmniTone.Neutral)">@(svc.IsRunning ? L["Yes"] : L["No"])</OmniBadge>
+                                <OmniBadge Fill="OmniFill.Solid" Tone="@(svc.IsRunning ? OmniTone.Accent : OmniTone.Neutral)">@(svc.IsRunning ? L["Yes"] : L["No"])</OmniBadge>
                             </Template>
                         </OmniDataGridColumn>
                     </Columns>

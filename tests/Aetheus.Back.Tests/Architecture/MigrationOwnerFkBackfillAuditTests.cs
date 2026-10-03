@@ -36,7 +36,7 @@ public class MigrationOwnerFkBackfillAuditTests
 
         var offenders = new List<string>();
 
-        foreach (var file in RepositoryScan.Enumerate(migrationsDir, "*.cs", SearchOption.TopDirectoryOnly))
+        foreach (var file in RepositoryScan.EnumerateTopLevel(migrationsDir, "*.cs"))
         {
             var name = Path.GetFileName(file);
             // Skip the designer/snapshot artefacts - only real migration classes have Up()/Down().

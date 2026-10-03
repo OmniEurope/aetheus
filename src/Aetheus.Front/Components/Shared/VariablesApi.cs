@@ -79,12 +79,14 @@ public sealed class VariablesApi(HttpClient http) : ApiClientBase(http)
         => DeleteAsync($"api/variable-libraries/{id}", ct);
 
 
-    public Task<VariableEntryDto?> CreateVariableEntryAsync(int libraryId, CreateVariableEntryRequest request, CancellationToken ct = default)
-        => PostJsonAsync<CreateVariableEntryRequest, VariableEntryDto>($"api/variable-libraries/{libraryId}/entries", request, ct);
+    /// <summary>A refused entry (recette R2-065: its key already exists) comes back as a 400 the caller explains.</summary>
+    public Task<ApiOutcome<VariableEntryDto, ApiError>> CreateVariableEntryAsync(int libraryId, CreateVariableEntryRequest request, CancellationToken ct = default)
+        => PostForOutcomeAsync<VariableEntryDto, ApiError>($"api/variable-libraries/{libraryId}/entries", request, ct);
 
 
-    public Task<VariableEntryDto?> UpdateVariableEntryAsync(int libraryId, int entryId, UpdateVariableEntryRequest request, CancellationToken ct = default)
-        => PutJsonAsync<UpdateVariableEntryRequest, VariableEntryDto>($"api/variable-libraries/{libraryId}/entries/{entryId}", request, ct);
+    /// <inheritdoc cref="CreateVariableEntryAsync"/>
+    public Task<ApiOutcome<VariableEntryDto, ApiError>> UpdateVariableEntryAsync(int libraryId, int entryId, UpdateVariableEntryRequest request, CancellationToken ct = default)
+        => PutForOutcomeAsync<VariableEntryDto, ApiError>($"api/variable-libraries/{libraryId}/entries/{entryId}", request, ct);
 
 
     public Task<ApiStatus> DeleteVariableEntryAsync(int libraryId, int entryId, CancellationToken ct = default)

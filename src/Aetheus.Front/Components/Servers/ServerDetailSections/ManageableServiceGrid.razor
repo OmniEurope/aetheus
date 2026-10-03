@@ -23,6 +23,19 @@
     </OmniStack>
 }
 
+@* Recette R2-030 (2026-10-02): an install or uninstall only moved its button; the line under the
+   status was easy to miss. What runs is said above the grid, with a moving bar, until it ends. *@
+@if (InFlightActions is { Count: > 0 } running)
+{
+    <OmniAlert Severity="OmniSeverity.Info" Class="omni-u-mb-sm service-actions-in-flight">
+        @foreach (var (service, action) in running)
+        {
+            <div class="service-action-in-flight"><OmniLink Href="@($"/tasks/{action.TaskId}")">@InFlightText(service, action)</OmniLink></div>
+        }
+        <OmniProgressBar Indeterminate="true" Shape="OmniProgressShape.Linear" Label="@InFlightText(running[0].Service, running[0].Action)" Class="omni-u-mt-xs" />
+    </OmniAlert>
+}
+
 @* R-509: on the module grid a click on the row opens the service's module; the checkbox and the
    buttons keep their own click. *@
 <OmniDataGrid @ref="_grid" Items="@Services.ToList()" TItem="ServiceInfoDto" KeyOf="@(row => row.Name)" NewRowHighlight="@(TimeSpan.FromSeconds(5))"
@@ -93,12 +106,7 @@
                         </span>
                     }
                 </OmniStack>
-                @* Recette R2-030: a moving bar while the agent has not answered; the agent gives no
-                   percentage. Outside the stack, so it takes the width of the cell's text. *@
-                @if (action is { InFlight: true })
-                {
-                    <OmniProgressBar Indeterminate="true" Shape="OmniProgressShape.Linear" Label="@ActionText(action)" Class="omni-u-mt-xs" />
-                }
+                @* Recette R2-030: the moving bar is in the banner above the grid since 2026-10-02. *@
                 </div>
             </Template>
         </OmniDataGridColumn>
@@ -126,7 +134,7 @@
                 }
                 else
                 {
-                    <OmniButton Variant="OmniButtonVariant.Secondary" OnClick="@(() => OnInstall.InvokeAsync(svc.Name))" Disabled="@(!ServerOnline || !CanInstall(svc.Name))" Class="@(IsBusy(svc.Name) ? "btn-busy" : null)" Busy="@IsBusy(svc.Name)" title="@(!ServerOnline ? L["AgentOfflineActionBlocked"].Value : InstallTitle(svc.Name))"><OmniIcon Name="OmniIconName.Download" /></OmniButton>
+                    <OmniButton Variant="OmniButtonVariant.Primary" OnClick="@(() => OnInstall.InvokeAsync(svc.Name))" Disabled="@(!ServerOnline || !CanInstall(svc.Name))" Class="@(IsBusy(svc.Name) ? "btn-busy" : null)" Busy="@IsBusy(svc.Name)" title="@(!ServerOnline ? L["AgentOfflineActionBlocked"].Value : InstallTitle(svc.Name))"><OmniIcon Name="OmniIconName.Download" /></OmniButton>
                 }
             </Template>
         </OmniDataGridColumn>

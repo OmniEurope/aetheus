@@ -73,6 +73,7 @@ public partial class PipelineRun : IAsyncDisposable
         _approval = new PipelineRunApprovalController(Api, Toast, ReloadRunAsync);
         _loading = true;
         _run = await LoadRootRunAsync(runId, ct).ConfigureAwait(false);
+        var approvalLoaded = await _approval.LoadIfWaitingAsync(_run, ct).ConfigureAwait(false);
         if (!IsCurrentLoad(runId, generation)) return;
         _loading = false;
         if (_run is not null)
@@ -83,7 +84,7 @@ public partial class PipelineRun : IAsyncDisposable
             _detailsLoading = true;
             PrepareRootRun();
             await InvokeAsync(StateHasChanged);
-            if (!await EnrichRunAsync(runId, generation, ct).ConfigureAwait(false)) return;
+            if (!await EnrichRunAsync(runId, generation, approvalLoaded, ct).ConfigureAwait(false)) return;
             _detailsLoading = false;
         }
         await _logStreamer.UpdateAsync(_selectedStep);
@@ -159,7 +160,7 @@ public partial class PipelineRun : IAsyncDisposable
         ReassertBreadcrumb();
     }
 
-    private async Task<bool> EnrichRunAsync(int runId, int generation, CancellationToken ct)
+    private async Task<bool> EnrichRunAsync(int runId, int generation, bool approvalLoaded, CancellationToken ct)
     {
         var rootRun = _run!;
         var repositoryTask = PipelineRunRepositoryResolver.ResolveAsync(Api, rootRun, ct);
@@ -168,7 +169,7 @@ public partial class PipelineRun : IAsyncDisposable
         var failedLogsTask = LoadFailedStepLogsAsync();
         // The approval only reads the run's id and status, which merging the children never changes,
         // so it no longer waits for the gate and the metrics.
-        var approvalTask = _approval!.LoadAsync(rootRun, ct);
+        var approvalTask = approvalLoaded ? Task.CompletedTask : _approval!.LoadAsync(rootRun, ct);
         var (children, mergedRun) = await PipelineRunChildAggregator.LoadAsync(rootRun, Api, _pageCache, ct);
         if (!IsCurrentLoad(runId, generation)) return false;
         _childRunCache.Clear();
